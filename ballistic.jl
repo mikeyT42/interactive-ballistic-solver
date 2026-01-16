@@ -370,7 +370,9 @@ function interactive_ballistic_solver_3d()
 
         result_text[] =
             "Shooter @ ($(round(shooter_x; digits=2)), $(round(shooter_y; digits=2)), 0)  " *
-            "Angle: $(round(angle; digits=2))°  Vel: $(round(vel; digits=2)) m/s"
+            "Launch Angle: $(round(angle; digits=2))°  Entry Angle: $(round(entry_angle))  " *
+            "Velocity: $(round(vel; digits=2)) m/s  Velocity Guess: $(round(v_guess; digits=2)) m/s  " *
+            "Percent Error $(round(abs((vel-v_guess)/v_guess) * 100)) %"
     end
 
     notify(shooter_dist)
