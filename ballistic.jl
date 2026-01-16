@@ -191,7 +191,7 @@ end
 # =========================================================================
 using GLMakie
 
-function interactive_ballistic_solver()
+function interactive_ballistic_solver_2d()
     fig = Figure(size=(900, 600))
 
     ax = Axis(fig[1,1],
@@ -260,12 +260,8 @@ function interactive_ballistic_solver()
 
     # Initial plot
     notify(dist_x)
-
-    display(fig)
+    display(GLMakie.Screen(), fig)
 end
-
-# To run:
-# interactive_ballistic_solver()
 
 function interactive_ballistic_solver_3d()
     # ---------------------------------------------------------
@@ -376,5 +372,8 @@ function interactive_ballistic_solver_3d()
     end
 
     notify(shooter_dist)
-    display(fig)
+    display(GLMakie.Screen(), fig)
 end
+
+@async interactive_ballistic_solver_2d()
+@async interactive_ballistic_solver_3d()
