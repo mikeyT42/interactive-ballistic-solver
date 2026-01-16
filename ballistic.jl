@@ -266,3 +266,113 @@ end
 
 # To run:
 # interactive_ballistic_solver()
+
+function interactive_ballistic_solver_3d()
+    # ---------------------------------------------------------
+    # Fixed target in world space
+    # ---------------------------------------------------------
+    TARGET_X = 6.14
+    TARGET_Y = 0.0
+    TARGET_Z = 1.83
+
+    fig = Figure(size = (900, 600))
+
+    ax = Axis3(fig[1, 1],
+        title = "Ballistic Trajectory (3D)",
+        xlabel = "X (m)",
+        ylabel = "Y (m)",
+        zlabel = "Z (m)"
+    )
+
+    xlims!(ax, -1, 7)
+    ylims!(ax, -4, 4)
+    zlims!(ax, 0, 10)
+
+    # ---------------------------------------------------------
+    # Controls (3D window only)
+    # ---------------------------------------------------------
+    sg = SliderGrid(fig[2, 1],
+        (label = "Shooter Distance From Target (m)", range = 1.0:0.05:7.0, startvalue = 6.14),
+        (label = "Shooter Lateral Y (m)",            range = -4.0:0.1:4.0, startvalue = 0.0),
+        (label = "Shape Scalar (0–1)",               range = 0:0.01:1, startvalue = 0.5),
+    )
+
+    blocked_toggle = Toggle(fig, active = false)
+    fig[2, 2] = hgrid!(Label(fig, "Blocked Mode"), blocked_toggle)
+
+    result_text = Observable("—")
+    Label(fig[3, 1:2], result_text, tellwidth = false)
+
+    # ---------------------------------------------------------
+    # Observables
+    # ---------------------------------------------------------
+    shooter_dist = sg.sliders[1].value
+    shooter_lat  = sg.sliders[2].value
+    shape_scalar = sg.sliders[3].value
+    blocked      = blocked_toggle.active
+
+    estimate_colors = [:red, :orange, :gold, :green, :blue, :purple]
+
+    # ---------------------------------------------------------
+    # Update loop (ONLY responds to 3D sliders)
+    # ---------------------------------------------------------
+    onany(shooter_dist, shooter_lat, shape_scalar, blocked) do d, lat, ss, bm
+        empty!(ax)
+
+        # Shooter world position
+        shooter_x = TARGET_X - d
+        shooter_y = lat
+        shooter_z = 0.0
+
+        dx = d
+        dy = TARGET_Z
+
+        # Run solver locally
+        angle, vel, final_pts, estimates, entry_angle, v_guess =
+            calculate(dx, dy, ss, bm)
+
+        # Plot target
+        scatter!(ax, [TARGET_X], [TARGET_Y], [TARGET_Z],
+                 color = :red, markersize = 25)
+
+        # Plot shooter
+        scatter!(ax, [shooter_x], [shooter_y], [shooter_z],
+                 color = :black, markersize = 15)
+
+        # Estimate trajectories
+        for (i, pts) in enumerate(estimates)
+            if isempty(pts); continue; end
+            xs = Float64[]
+            ys = Float64[]
+            zs = Float64[]
+            for (x2d, y2d) in pts
+                push!(xs, shooter_x + x2d)
+                push!(ys, shooter_y * (1 - x2d / dx))
+                push!(zs, y2d)
+            end
+            col = estimate_colors[mod1(i, length(estimate_colors))]
+            lines!(ax, xs, ys, zs, linewidth = 1.2,
+                   linestyle = :dash, color = col, alpha = 0.6)
+        end
+
+        # Final trajectory
+        if !isempty(final_pts)
+            xs = Float64[]
+            ys = Float64[]
+            zs = Float64[]
+            for (x2d, y2d) in final_pts
+                push!(xs, shooter_x + x2d)
+                push!(ys, shooter_y * (1 - x2d / dx))
+                push!(zs, y2d)
+            end
+            lines!(ax, xs, ys, zs, linewidth = 4, color = :blue)
+        end
+
+        result_text[] =
+            "Shooter @ ($(round(shooter_x; digits=2)), $(round(shooter_y; digits=2)), 0)  " *
+            "Angle: $(round(angle; digits=2))°  Vel: $(round(vel; digits=2)) m/s"
+    end
+
+    notify(shooter_dist)
+    display(fig)
+end
