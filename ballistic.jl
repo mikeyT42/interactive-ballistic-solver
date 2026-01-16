@@ -1,8 +1,8 @@
 using LinearAlgebra
 
-# =========================================================================
+# ==============================================================================
 # PHYSICAL CONSTANTS (Tune these to your specific ball/environment)
-# =========================================================================
+# ==============================================================================
 const G = 9.81
 const MASS = 0.27
 const RADIUS = 0.12
@@ -11,21 +11,25 @@ const AIR_DENSITY = 1.225
 const DRAG_COEFF = 0.47
 const LIFT_COEFF = 0.15
 
-# =========================================================================
+# ==============================================================================
 # SOLVER SETTINGS
-# =========================================================================
+# ==============================================================================
 const MAX_SECANT_ITERS = 5
 const TIME_STEP = 0.01
 const MAX_SIM_TIME = 5.0
 
-# =========================================================================
+# ==============================================================================
 # PUBLIC API
-# =========================================================================
+# ==============================================================================
 """
 Main solver function - 1:1 match to original Java logic.
-Returns: launch angle (deg), launch velocity (m/s), final trajectory points (Vector of (x,y)), list of estimate trajectories, entry angle, and initial v guess.
+Returns: launch angle (deg), launch velocity (m/s), final trajectory points
+(Vector of (x,y)), list of estimate trajectories, entry angle, and initial v 
+guess.
 """
-function calculate(target_dist_x::Float64, target_height_y::Float64, shape_scalar::Float64, is_blocked_mode::Bool)
+function calculate(target_dist_x::Float64, target_height_y::Float64,
+    shape_scalar::Float64, is_blocked_mode::Bool)
+
     theta_rad = 0.0
     entry_deg = NaN
 
@@ -49,11 +53,13 @@ function calculate(target_dist_x::Float64, target_height_y::Float64, shape_scala
     cos_theta = cos(theta_rad)
     tan_theta = tan(theta_rad)
     numerator = G * target_dist_x * target_dist_x
-    denominator = 2 * cos_theta * cos_theta * ((target_dist_x * tan_theta) - target_height_y)
+    denominator = 2 * cos_theta * cos_theta *
+                    ((target_dist_x * tan_theta) - target_height_y)
 
     v_guess = NaN
     if denominator <= 0
-        return 45.0, 0.0, Vector{Tuple{Float64,Float64}}(), Vector{Vector{Tuple{Float64,Float64}}}(), entry_deg, v_guess
+        return 45.0, 0.0, Vector{Tuple{Float64,Float64}}(),
+            Vector{Vector{Tuple{Float64,Float64}}}(), entry_deg, v_guess
     end
 
     v_guess = sqrt(numerator / denominator)
@@ -87,20 +93,25 @@ function calculate(target_dist_x::Float64, target_height_y::Float64, shape_scala
     estimates_2d = Vector{Vector{Tuple{Float64,Float64}}}()
     for v in vs[1:end-1]  # All but final
         if v > 0
-            _, points = simulate_shot_height(v, theta_rad, target_dist_x; collect_points=true)
+            _, points = simulate_shot_height(v, theta_rad, target_dist_x;
+                collect_points=true)
             push!(estimates_2d, points)
         end
     end
 
-    _, final_points = simulate_shot_height(v1, theta_rad, target_dist_x; collect_points=true)
+    _, final_points = simulate_shot_height(v1, theta_rad, target_dist_x;
+        collect_points=true)
 
-    return rad2deg(theta_rad), v1, final_points, estimates_2d, entry_deg, v_guess
+    return rad2deg(theta_rad), v1, final_points, estimates_2d, entry_deg,
+        v_guess
 end
 
-# =========================================================================
+# ==============================================================================
 # PRIVATE HELPER - exact match to Java
-# =========================================================================
-function simulate_shot_height(v0::Float64, theta::Float64, target_x::Float64; collect_points::Bool=false)
+# ==============================================================================
+function simulate_shot_height(v0::Float64, theta::Float64, target_x::Float64;
+    collect_points::Bool=false)
+
     x = 0.0
     y = 0.0
     vx = v0 * cos(theta)
@@ -186,9 +197,9 @@ function get_acc_y(vx::Float64, vy::Float64)::Float64
     return (f_grav_y + f_drag_y + f_lift_y) / MASS
 end
 
-# =========================================================================
+# ==============================================================================
 # 2D INTERACTIVE PLOTTING
-# =========================================================================
+# ==============================================================================
 using GLMakie
 
 function interactive_ballistic_solver_2d()
@@ -217,7 +228,7 @@ function interactive_ballistic_solver_2d()
     fig[2,2] = hgrid!(toggles, Label(fig, "Blocked Mode"))
 
     # Text display for results
-    result_text = Observable("Launch Angle: -- °   Velocity: -- m/s   Entry Angle: -- °")
+    result_text = Observable("--")
     Label(fig[3,1], result_text, tellwidth=false)
 
     # Observables for inputs
@@ -232,7 +243,8 @@ function interactive_ballistic_solver_2d()
     onany(dist_x, height_y, shape_scalar, blocked_mode) do dx, hy, ss, bm
         empty!(ax)
 
-        angle, vel, final_points, estimates, entry_angle, v_guess = calculate(dx, hy, ss, bm)
+        angle, vel, final_points, estimates, entry_angle, v_guess =
+                                                    calculate(dx, hy, ss, bm)
 
         # Plot estimate trajectories (convergence steps)
         for (i, pts) in enumerate(estimates)
@@ -240,7 +252,8 @@ function interactive_ballistic_solver_2d()
                 xs = [p[1] for p in pts]
                 ys = [p[2] for p in pts]
                 col = estimate_colors[mod1(i, length(estimate_colors))]
-                lines!(ax, xs, ys, color=col, linewidth=1.2, alpha=0.6, linestyle=:dash)
+                lines!(ax, xs, ys, color=col, linewidth=1.2, alpha=0.6,
+                    linestyle=:dash)
             end
         end
 
@@ -255,7 +268,12 @@ function interactive_ballistic_solver_2d()
         scatter!(ax, [Point2f(dx, hy)], color=:red, markersize=20)
 
         # Update result text
-        result_text[] = "Launch Angle: $(round(angle, digits=2)) °  Entry Angle: $(round(entry_angle, digits=2)) °  Velocity: $(round(vel, digits=2)) m/s  Velocity Guess: $(round(v_guess, digits=2)) m/s Percent Error $(round(abs((vel-v_guess)/v_guess) * 100)) %"
+        result_text[] =
+            "Launch Angle: $(round(angle, digits=2)) °  " *
+            "Entry Angle: $(round(entry_angle, digits=2)) °  " *
+            "Velocity: $(round(vel, digits=2)) m/s  " *
+            "Velocity Guess: $(round(v_guess, digits=2)) m/s " *
+            "Percent Error $(round(abs((vel-v_guess)/v_guess) * 100)) %"
     end
 
     # Initial plot
@@ -263,6 +281,9 @@ function interactive_ballistic_solver_2d()
     display(GLMakie.Screen(), fig)
 end
 
+# ==============================================================================
+# 3D INTERACTIVE PLOTTING
+# ==============================================================================
 function interactive_ballistic_solver_3d()
     # ---------------------------------------------------------
     # Fixed target in world space
@@ -288,9 +309,12 @@ function interactive_ballistic_solver_3d()
     # Controls (3D window only)
     # ---------------------------------------------------------
     sg = SliderGrid(fig[2, 1],
-        (label = "Shooter Distance From Target (m)", range = 1.0:0.05:7.0, startvalue = 6.14),
-        (label = "Shooter Lateral Y (m)",            range = -4.0:0.1:4.0, startvalue = 0.0),
-        (label = "Shape Scalar (0–1)",               range = 0:0.01:1, startvalue = 0.5),
+        (label = "Shooter Distance From Target (m)", range = 1.0:0.05:7.0,
+            startvalue = 6.14),
+        (label = "Shooter Lateral Y (m)",            range = -4.0:0.1:4.0,
+            startvalue = 0.0),
+        (label = "Shape Scalar (0–1)",               range = 0:0.01:1,
+            startvalue = 0.5),
     )
 
     blocked_toggle = Toggle(fig, active = false)
@@ -365,9 +389,12 @@ function interactive_ballistic_solver_3d()
         end
 
         result_text[] =
-            "Shooter @ ($(round(shooter_x; digits=2)), $(round(shooter_y; digits=2)), 0)  " *
-            "Launch Angle: $(round(angle; digits=2))°  Entry Angle: $(round(entry_angle))  " *
-            "Velocity: $(round(vel; digits=2)) m/s  Velocity Guess: $(round(v_guess; digits=2)) m/s  " *
+            "Shooter @ ($(round(shooter_x; digits=2)), " *
+                "$(round(shooter_y; digits=2)), 0)  " *
+            "Launch Angle: $(round(angle; digits=2))°  " *
+            "Entry Angle: $(round(entry_angle))  " *
+            "Velocity: $(round(vel; digits=2)) m/s  " *
+            "Velocity Guess: $(round(v_guess; digits=2)) m/s  " *
             "Percent Error $(round(abs((vel-v_guess)/v_guess) * 100)) %"
     end
 
