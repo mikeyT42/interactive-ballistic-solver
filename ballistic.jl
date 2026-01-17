@@ -1,11 +1,9 @@
-using LinearAlgebra
-
 # ==============================================================================
 # PHYSICAL CONSTANTS (Tune these to your specific ball/environment)
 # ==============================================================================
 const G = 9.81
-const MASS = 0.27
-const RADIUS = 0.12
+const MASS = 0.216
+const RADIUS = 0.075
 const AREA = π * RADIUS * RADIUS
 const AIR_DENSITY = 1.225
 const DRAG_COEFF = 0.47
