@@ -1,404 +1,317 @@
-# ==============================================================================
-# PHYSICAL CONSTANTS (Tune these to your specific ball/environment)
-# ==============================================================================
-const G = 9.81
-const MASS = 0.216
-const RADIUS = 0.075
-const AREA = π * RADIUS^2
-const AIR_DENSITY = 1.225
-const DRAG_COEFF = 0.47
-const LIFT_COEFF = 0.15
-
-# ==============================================================================
-# SOLVER SETTINGS
-# ==============================================================================
-const MAX_SECANT_ITERS = 5
-const TIME_STEP = 0.01
-const MAX_SIM_TIME = 5.0
-
-# ==============================================================================
-# PUBLIC API
-# ==============================================================================
-"""
-Main solver function - 1:1 match to original Java logic.
-Returns: launch angle (deg), launch velocity (m/s), final trajectory points
-(Vector of (x,y)), list of estimate trajectories, entry angle, and initial v 
-guess.
-"""
-function calculate(target_dist_x::Float64, target_height_y::Float64,
-    α_shape_scalar::Float64, is_blocked_mode::Bool)
-
-    θ_rad = 0.0
-    entry_deg = NaN
-
-    # --- STEP 1: Determine the fixed Launch Angle (Theta θ) ---
-    if is_blocked_mode
-        θ_deg = 80.0
-        θ_rad = deg2rad(θ_deg)
-    else
-        min_entry = -45.0
-        max_entry = -75.0
-        entry_deg = min_entry + (α_shape_scalar * (max_entry - min_entry))
-        entry_rad = deg2rad(entry_deg)
-        term1 = (2 * target_height_y) / target_dist_x
-        term2 = tan(entry_rad)
-        θ_rad = atan(term1 - term2)
-    end
-
-    # --- STEP 2: Estimate Initial Velocity (Vacuum Guess) ---
-    cos_θ = cos(θ_rad)
-    tan_θ = tan(θ_rad)
-    numerator = G * target_dist_x^2
-    denominator = 2 * cos_θ * cos_θ *
-                  ((target_dist_x * tan_θ) - target_height_y)
-
-    v_guess = NaN
-    if denominator <= 0
-        return 45.0, 0.0, Vector{Tuple{Float64,Float64}}(),
-        Vector{Vector{Tuple{Float64,Float64}}}(), entry_deg, v_guess
-    end
-
-    v_guess = √(numerator / denominator)
-
-    # --- STEP 3: Refine Velocity using Secant Method ---
-    v₀ = v_guess
-    v₁ = v_guess + 0.5
-    y₀ = simulate_shot_height(v₀, θ_rad, target_dist_x)
-    y₁ = simulate_shot_height(v₁, θ_rad, target_dist_x)
-
-    vs = [v₀, v₁]  # Collect all velocities used for plotting estimates
-
-    for _ in 1:MAX_SECANT_ITERS
-        if abs(y₁ - y₀) < 0.0001
-            break
-        end
-        error₁ = y₁ - target_height_y
-        error₀ = y₀ - target_height_y
-        v_new = v₁ - error₁ * (v₁ - v₀) / (error₁ - error₀)
-        push!(vs, v_new)
-        v₀ = v₁
-        y₀ = y₁
-        v₁ = v_new
-        y₁ = simulate_shot_height(v₁, θ_rad, target_dist_x)
-        if abs(y₁ - target_height_y) < 0.01
-            break
-        end
-    end
-
-    # --- STEP 4: Get Trajectories for Plotting ---
-    estimates_2d = Vector{Vector{Tuple{Float64,Float64}}}()
-    for v in vs[1:end-1]  # All but final
-        if v > 0
-            _, points = simulate_shot_height(v, θ_rad, target_dist_x;
-                collect_points=true)
-            push!(estimates_2d, points)
-        end
-    end
-
-    _, final_points = simulate_shot_height(v₁, θ_rad, target_dist_x;
-        collect_points=true)
-
-    return rad2deg(θ_rad), v₁, final_points, estimates_2d, entry_deg,
-    v_guess
-end
-
-# ==============================================================================
-# PRIVATE HELPER - exact match to Java
-# ==============================================================================
-function simulate_shot_height(v₀::Float64, θ::Float64, target_x::Float64;
-    collect_points::Bool=false)
-
-    x = 0.0
-    y = 0.0
-    vx = v₀ * cos(θ)
-    vy = v₀ * sin(θ)
-
-    Δt = TIME_STEP
-    time = 0.0
-
-    points = collect_points ? Vector{Tuple{Float64,Float64}}() : nothing
-    if collect_points
-        push!(points, (x, y))
-    end
-
-    while x < target_x && time < MAX_SIM_TIME
-        predicted_x = x + vx * Δt
-        if predicted_x > target_x
-            remaining_dist = target_x - x
-            Δt = remaining_dist / vx
-        end
-
-        # RK4 k1
-        ax₁ = get_acc_x(vx, vy)
-        ay₁ = get_acc_y(vx, vy)
-        # k2
-        vx₂ = vx + ax₁ * (Δt * 0.5)
-        vy₂ = vy + ay₁ * (Δt * 0.5)
-        ax₂ = get_acc_x(vx₂, vy₂)
-        ay₂ = get_acc_y(vx₂, vy₂)
-        # k3
-        vx₃ = vx + ax₂ * (Δt * 0.5)
-        vy₃ = vy + ay₂ * (Δt * 0.5)
-        ax₃ = get_acc_x(vx₃, vy₃)
-        ay₃ = get_acc_y(vx₃, vy₃)
-        # k4
-        vx₄ = vx + ax₃ * Δt
-        vy₄ = vy + ay₃ * Δt
-        ax₄ = get_acc_x(vx₄, vy₄)
-        ay₄ = get_acc_y(vx₄, vy₄)
-
-        ax_avg = (ax₁ + 2 * ax₂ + 2 * ax₃ + ax₄) / 6.0
-        ay_avg = (ay₁ + 2 * ay₂ + 2 * ay₃ + ay₄) / 6.0
-
-        x += vx * Δt + 0.5 * ax_avg * Δt * Δt
-        y += vy * Δt + 0.5 * ay_avg * Δt * Δt
-        vx += ax_avg * Δt
-        vy += ay_avg * Δt
-        time += Δt
-
-        if collect_points
-            push!(points, (x, y))
-        end
-    end
-
-    if collect_points
-        return y, points
-    else
-        return y
-    end
-end
-
-function get_acc_x(vx::Float64, vy::Float64)::Float64
-    v = √(vx * vx + vy * vy)
-    if v == 0
-        return 0.0
-    end
-    f_drag_mag = 0.5 * AIR_DENSITY * AREA * DRAG_COEFF * v^2
-    f_drag_x = -f_drag_mag * (vx / v)
-    f_lift_mag = 0.5 * AIR_DENSITY * AREA * LIFT_COEFF * v^2
-    f_lift_x = -f_lift_mag * (vy / v)
-    return (f_drag_x + f_lift_x) / MASS
-end
-
-function get_acc_y(vx::Float64, vy::Float64)::Float64
-    v = √(vx * vx + vy * vy)
-    if v == 0
-        return -G
-    end
-    f_grav_y = -MASS * G
-    f_drag_mag = 0.5 * AIR_DENSITY * AREA * DRAG_COEFF * v^2
-    f_drag_y = -f_drag_mag * (vy / v)
-    f_lift_mag = 0.5 * AIR_DENSITY * AREA * LIFT_COEFF * v^2
-    f_lift_y = f_lift_mag * (vx / v)
-    return (f_grav_y + f_drag_y + f_lift_y) / MASS
-end
-
-# ==============================================================================
-# 2D INTERACTIVE PLOTTING
-# ==============================================================================
 using GLMakie
 
-function interactive_ballistic_solver_2d()
-    fig = Figure(size=(900, 600))
+# ═══════════════════════════════════════════════════════════════════════════
+#  Physical Constants
+# ═══════════════════════════════════════════════════════════════════════════
+const g   = 9.81                       # gravitational acceleration       [m/s²]
+const M   = 0.216                      # ball mass                        [kg]
+const R   = 0.075                      # ball radius                      [m]
+const A   = π * R^2                    # cross-sectional area             [m²]
+const ρ   = 1.199                      # air density (20°C, 101 kPa, 50%RH)  [kg/m³]
+const C_D = 0.47                       # drag coefficient
+const C_L = 0.031                      # lift (Magnus) coefficient
 
-    ax = Axis(fig[1, 1],
-        title="Ballistic Trajectory (2D)",
-        xlabel="Horizontal Distance (m)",
-        ylabel="Height (m)",
-        xgridvisible=true,
-        ygridvisible=true
-    )
+# ═══════════════════════════════════════════════════════════════════════════
+#  Solver Tuning
+# ═══════════════════════════════════════════════════════════════════════════
+const N_SECANT = 5                     # max secant iterations
+const Δt₀     = 0.01                   # integration time-step            [s]
+const t_max   = 5.0                    # simulation time ceiling          [s]
+const v_max   = 35.0                   # flywheel speed ceiling           [m/s]
+const ε_h     = 0.02                   # height-error tolerance           [m]
 
-    # Fixed limits - adjust if needed
-    xlims!(ax, 0, 8)
-    ylims!(ax, 0, 10)
+# ═══════════════════════════════════════════════════════════════════════════
+#  Aerodynamic Acceleration  (2-D radial–vertical plane)
+#
+#    vₓ : horizontal (radial) velocity     [m/s]
+#    vz : vertical velocity  (+up)         [m/s]
+# ═══════════════════════════════════════════════════════════════════════════
 
-    # Sliders
-    sg = SliderGrid(fig[2, 1],
-        (label="Target Distance X (m)", range=0:0.1:6.14, startvalue=3.0),
-        (label="Target Height Y (m)", range=0:0.1:1.83, startvalue=1.83),
-        (label="Shape Scalar (0-1)", range=0:0.01:1, startvalue=0.5),
-    )
-
-    toggles = Toggle(fig, active=false)
-    fig[2, 2] = hgrid!(toggles, Label(fig, "Blocked Mode"))
-
-    # Text display for results
-    result_text = Observable("--")
-    Label(fig[3, 1], result_text, tellwidth=false)
-
-    # Observables for inputs
-    dist_x = sg.sliders[1].value
-    height_y = sg.sliders[2].value
-    shape_scalar = sg.sliders[3].value
-    blocked_mode = toggles.active
-
-    # Color cycle for estimates
-    estimate_colors = [:red, :orange, :gold, :green, :blue, :purple]
-
-    onany(dist_x, height_y, shape_scalar, blocked_mode) do dx, hy, ss, bm
-        empty!(ax)
-
-        angle, vel, final_points, estimates, entry_angle, v_guess =
-            calculate(dx, hy, ss, bm)
-
-        # Plot estimate trajectories (convergence steps)
-        for (i, pts) in enumerate(estimates)
-            if !isempty(pts)
-                xs = [p[1] for p in pts]
-                ys = [p[2] for p in pts]
-                col = estimate_colors[mod1(i, length(estimate_colors))]
-                lines!(ax, xs, ys, color=col, linewidth=1.2, alpha=0.6,
-                    linestyle=:dash)
-            end
-        end
-
-        # Plot final solved trajectory
-        if !isempty(final_points)
-            xs = [p[1] for p in final_points]
-            ys = [p[2] for p in final_points]
-            lines!(ax, xs, ys, color=:blue, linewidth=4)
-        end
-
-        # Target point
-        scatter!(ax, [Point2f(dx, hy)], color=:red, markersize=20)
-
-        # Update result text
-        result_text[] =
-            "Launch Angle: $(round(angle, digits=2)) °  " *
-            "Entry Angle: $(round(entry_angle, digits=2)) °  " *
-            "Velocity: $(round(vel, digits=2)) m/s  " *
-            "Velocity Guess: $(round(v_guess, digits=2)) m/s " *
-            "Percent Error $(round(abs((vel-v_guess)/v_guess) * 100)) %"
-    end
-
-    # Initial plot
-    notify(dist_x)
-    display(GLMakie.Screen(), fig)
+"Horizontal (radial) acceleration: drag + Magnus cross-term."
+function aₓ(vₓ, vz)
+    v = hypot(vₓ, vz)
+    v == 0.0 && return 0.0
+    Fd = -0.5 * ρ * A * C_D * v * vₓ
+    Fl = -0.5 * ρ * A * C_L * v * vz
+    return (Fd + Fl) / M
 end
 
-# ==============================================================================
-# 3D INTERACTIVE PLOTTING
-# ==============================================================================
-function interactive_ballistic_solver_3d()
-    # ---------------------------------------------------------
-    # Fixed target in world space
-    # ---------------------------------------------------------
-    TARGET_X = 6.14
-    TARGET_Y = 0.0
-    TARGET_Z = 1.83
-
-    fig = Figure(size=(900, 600))
-
-    ax = Axis3(fig[1, 1],
-        title="Ballistic Trajectory (3D)",
-        xlabel="X (m)",
-        ylabel="Y (m)",
-        zlabel="Z (m)"
-    )
-
-    xlims!(ax, -1, 7)
-    ylims!(ax, -4, 4)
-    zlims!(ax, 0, 10)
-
-    # ---------------------------------------------------------
-    # Controls (3D window only)
-    # ---------------------------------------------------------
-    sg = SliderGrid(fig[2, 1],
-        (label="Shooter Distance From Target (m)", range=1.0:0.05:7.0,
-            startvalue=6.14),
-        (label="Shooter Lateral Y (m)", range=-4.0:0.1:4.0,
-            startvalue=0.0),
-        (label="Shape Scalar (0–1)", range=0:0.01:1,
-            startvalue=0.5),
-    )
-
-    blocked_toggle = Toggle(fig, active=false)
-    fig[2, 2] = hgrid!(Label(fig, "Blocked Mode"), blocked_toggle)
-
-    result_text = Observable("—")
-    Label(fig[3, 1:2], result_text, tellwidth=false)
-
-    # ---------------------------------------------------------
-    # Observables
-    # ---------------------------------------------------------
-    shooter_dist = sg.sliders[1].value
-    shooter_lat = sg.sliders[2].value
-    shape_scalar = sg.sliders[3].value
-    blocked = blocked_toggle.active
-
-    estimate_colors = [:red, :orange, :gold, :green, :blue, :purple]
-
-    # ---------------------------------------------------------
-    # Update loop (ONLY responds to 3D sliders)
-    # ---------------------------------------------------------
-    onany(shooter_dist, shooter_lat, shape_scalar, blocked) do d, lat, ss, bm
-        empty!(ax)
-
-        # Shooter world position
-        shooter_x = TARGET_X - d
-        shooter_y = lat
-        shooter_z = 0.0
-
-        dx = d
-        dy = TARGET_Z
-
-        # Run solver locally
-        angle, vel, final_pts, estimates, entry_angle, v_guess =
-            calculate(dx, dy, ss, bm)
-
-        # Plot target
-        scatter!(ax, [TARGET_X], [TARGET_Y], [TARGET_Z],
-            color=:red, markersize=25)
-
-        # Plot shooter
-        scatter!(ax, [shooter_x], [shooter_y], [shooter_z],
-            color=:black, markersize=15)
-
-        # Estimate trajectories
-        for (i, pts) in enumerate(estimates)
-            if isempty(pts)
-                continue
-            end
-            xs = Float64[]
-            ys = Float64[]
-            zs = Float64[]
-            for (x2d, y2d) in pts
-                push!(xs, shooter_x + x2d)
-                push!(ys, shooter_y * (1 - x2d / dx))
-                push!(zs, y2d)
-            end
-            col = estimate_colors[mod1(i, length(estimate_colors))]
-            lines!(ax, xs, ys, zs, linewidth=1.2,
-                linestyle=:dash, color=col, alpha=0.6)
-        end
-
-        # Final trajectory
-        if !isempty(final_pts)
-            xs = Float64[]
-            ys = Float64[]
-            zs = Float64[]
-            for (x2d, y2d) in final_pts
-                push!(xs, shooter_x + x2d)
-                push!(ys, shooter_y * (1 - x2d / dx))
-                push!(zs, y2d)
-            end
-            lines!(ax, xs, ys, zs, linewidth=4, color=:blue)
-        end
-
-        result_text[] =
-            "Shooter @ ($(round(shooter_x; digits=2)), " *
-            "$(round(shooter_y; digits=2)), 0)  " *
-            "Launch Angle: $(round(angle; digits=2))°  " *
-            "Entry Angle: $(round(entry_angle))  " *
-            "Velocity: $(round(vel; digits=2)) m/s  " *
-            "Velocity Guess: $(round(v_guess; digits=2)) m/s  " *
-            "Percent Error $(round(abs((vel-v_guess)/v_guess) * 100)) %"
-    end
-
-    notify(shooter_dist)
-    display(GLMakie.Screen(), fig)
+"Vertical acceleration: gravity + drag + Magnus lift."
+function az(vₓ, vz)
+    v = hypot(vₓ, vz)
+    v == 0.0 && return -g
+    Fg = -M * g
+    Fd = -0.5 * ρ * A * C_D * v * vz
+    Fl =  0.5 * ρ * A * C_L * v * vₓ
+    return (Fg + Fd + Fl) / M
 end
 
-@async interactive_ballistic_solver_2d()
-@async interactive_ballistic_solver_3d()
+# ═══════════════════════════════════════════════════════════════════════════
+#  RK4 Trajectory Integrator
+# ═══════════════════════════════════════════════════════════════════════════
+
+"""
+    simulate(vₓ₀, vz₀, d; trace=false)
+
+Integrate the 2-D ballistic arc with drag + Magnus until radial
+distance reaches `d`.
+
+Returns final height `z`.  With `trace=true` returns `(z, points)`.
+"""
+function simulate(vₓ₀, vz₀, d; trace=false)
+    x,  z  = 0.0, 0.0
+    vₓ, vz = Float64(vₓ₀), Float64(vz₀)
+    Δt     = Δt₀
+    t      = 0.0
+
+    pts = trace ? Tuple{Float64,Float64}[(0.0, 0.0)] : nothing
+
+    while x < d && t < t_max
+        # Trim the last step so x lands on d
+        if x + vₓ * Δt > d
+            Δt = (d - x) / vₓ
+        end
+
+        # ── RK4 stages ────────────────────────────
+        kₓ₁ = aₓ(vₓ,             vz            )
+        kz₁ = az(vₓ,             vz            )
+
+        kₓ₂ = aₓ(vₓ + kₓ₁*Δt/2, vz + kz₁*Δt/2)
+        kz₂ = az(vₓ + kₓ₁*Δt/2, vz + kz₁*Δt/2)
+
+        kₓ₃ = aₓ(vₓ + kₓ₂*Δt/2, vz + kz₂*Δt/2)
+        kz₃ = az(vₓ + kₓ₂*Δt/2, vz + kz₂*Δt/2)
+
+        kₓ₄ = aₓ(vₓ + kₓ₃*Δt,   vz + kz₃*Δt  )
+        kz₄ = az(vₓ + kₓ₃*Δt,   vz + kz₃*Δt  )
+
+        # Weighted average
+        āₓ = (kₓ₁ + 2kₓ₂ + 2kₓ₃ + kₓ₄) / 6
+        āz = (kz₁ + 2kz₂ + 2kz₃ + kz₄) / 6
+
+        # Update state
+        x  += vₓ * Δt + 0.5 * āₓ * Δt^2
+        z  += vz * Δt + 0.5 * āz * Δt^2
+        vₓ += āₓ * Δt
+        vz += āz * Δt
+        t  += Δt
+
+        !isnothing(pts) && push!(pts, (x, z))
+    end
+
+    return trace ? (z, pts) : z
+end
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Fixed-Hood Height Helper  (called inside secant loop)
+# ═══════════════════════════════════════════════════════════════════════════
+
+"""
+Height at target distance `d` for world horizontal speed `m`,
+subtracting robot velocity and deriving vz from the fixed hood angle.
+"""
+function h_at_m(m, Vx, Vy, cosφ, sinφ, tanθ, d)
+    sx  = m * cosφ - Vx                # shooter velocity x  (field)
+    sy  = m * sinφ - Vy                # shooter velocity y  (field)
+    v_h = hypot(sx, sy)                # horizontal speed, shooter frame
+    v_z = v_h * tanθ                   # vertical from fixed hood
+    return simulate(m, v_z, d)
+end
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Main Ballistic Solver
+#  (1:1 with Java  VelocityAngleSolver.calculate)
+# ═══════════════════════════════════════════════════════════════════════════
+
+"""
+    calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
+
+Full ballistic solve with moving-reference-frame compensation.
+
+| symbol  | meaning                                |
+|---------|----------------------------------------|
+| d_floor | radial floor distance to target  [m]   |
+| Δz      | target vertical offset (height)  [m]   |
+| φᵣ_deg  | target azimuth, **robot** frame  [°]   |
+| ψ_deg   | robot heading (field, Pigeon 2)  [°]   |
+| Vx, Vy  | field-centric robot velocity     [m/s] |
+| θ_deg   | fixed hood launch angle          [°]   |
+
+Returns `NamedTuple`:
+  flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
+"""
+function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
+
+    # ── Early bail-out ──
+    if d_floor < 0.1
+        return (flywheel   = 0.0,  turret_yaw = 0.0,
+                error      = 999.0, valid      = false,
+                trajectory = Tuple{Float64,Float64}[],
+                estimates  = Vector{Tuple{Float64,Float64}}[],
+                m_guess    = 0.0)
+    end
+
+    # 1 ── Angle conversion  (robot → field) ──
+    φᵣ         = deg2rad(φᵣ_deg)
+    ψ          = deg2rad(ψ_deg)
+    φ          = φᵣ + ψ                       # field-centric azimuth
+    cosφ, sinφ = cos(φ), sin(φ)
+
+    θ    = deg2rad(θ_deg)
+    cosθ = cos(θ)
+    tanθ = tan(θ)
+
+    # 2 ── Vacuum initial guess ──
+    num = g * d_floor^2
+    den = 2cosθ^2 * (d_floor * tanθ - Δz)
+    den = den ≤ 0.0 ? 0.001 : den             # guard NaN
+    v_w = √(num / den)
+    m̂   = v_w * cosθ                          # vacuum guess
+
+    # 3 ── Secant iteration on m ──
+    m₀ = m̂
+    m₁ = m̂ + 0.5
+    h₀ = h_at_m(m₀, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+    h₁ = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+
+    ms = [m₀, m₁]                             # archive for viz
+
+    converged = false
+    for _ in 1:N_SECANT
+        if abs(h₁ - h₀) < 1e-4
+            converged = true; break
+        end
+        ε₁ = h₁ - Δz
+        ε₀ = h₀ - Δz
+        m_new = m₁ - ε₁ * (m₁ - m₀) / (ε₁ - ε₀)
+        push!(ms, m_new)
+
+        m₀, h₀ = m₁, h₁
+        m₁      = m_new
+        h₁      = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+
+        if abs(h₁ - Δz) < 0.01
+            converged = true; break
+        end
+    end
+
+    # 4 ── Final flywheel speed ──
+    m_f = m₁
+    sx  = m_f * cosφ - Vx
+    sy  = m_f * sinφ - Vy
+    v_h = hypot(sx, sy)
+    flywheel = cosθ > 1e-3 ? v_h / cosθ : 0.0
+
+    # 5 ── Turret yaw  (shot leading removed — pure direction) ──
+    yaw = rad2deg(φ) - ψ_deg
+    yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
+
+    # 6 ── Validity  (Stage-1 math/geometry) ──
+    sim_err = abs(h₁ - Δz)
+    valid   = converged && sim_err ≤ ε_h && flywheel > 0 && flywheel ≤ v_max
+
+    # 7 ── Trajectories for plot ──
+    estimates = Vector{Vector{Tuple{Float64,Float64}}}()
+    for m in ms[1:end-1]
+        m > 0 || continue
+        ex  = m * cosφ - Vx
+        ey  = m * sinφ - Vy
+        evz = hypot(ex, ey) * tanθ
+        _, pts = simulate(m, evz, d_floor; trace=true)
+        push!(estimates, pts)
+    end
+
+    _, final_pts = simulate(m_f, v_h * tanθ, d_floor; trace=true)
+
+    return (flywheel   = flywheel,
+            turret_yaw = yaw,
+            error      = sim_err,
+            valid      = valid,
+            trajectory = final_pts,
+            estimates  = estimates,
+            m_guess    = m̂)
+end
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Interactive GLMakie Visualisation
+# ═══════════════════════════════════════════════════════════════════════════
+
+function interactive_solver()
+    fig = Figure(size = (1050, 780))
+
+    ax = Axis(fig[1, 1];
+        title        = "Ballistic Trajectory  (Radial–Vertical Plane)",
+        xlabel       = "Radial Distance  [m]",
+        ylabel       = "Height  [m]",
+        xgridvisible = true,
+        ygridvisible = true)
+    xlims!(ax, 0, 10)
+    ylims!(ax, -2, 8)
+
+    sg = SliderGrid(fig[2, 1],
+        (label = "d_floor  [m]",
+         range = 0.5:0.01:3.0,       startvalue = 1.0),
+        (label = "Δz  (height)  [m]",
+         range = 0.0:0.05:2.0,       startvalue = 1.83),
+        (label = "φ_robot  (azimuth)  [°]",
+         range = -180.0:1.0:180.0,   startvalue = 0.0),
+        (label = "ψ  (heading)  [°]",
+         range = -180.0:1.0:180.0,   startvalue = 0.0),
+        (label = "Vₓ  robot (field)  [m/s]",
+         range = -3.0:0.1:3.0,       startvalue = 0.0),
+        (label = "Vy  robot (field)  [m/s]",
+         range = -3.0:0.1:3.0,       startvalue = 0.0),
+        (label = "θ  (launch angle)  [°]",
+         range = 60.0:1.0:80.0,     startvalue = 80.0),
+    )
+
+    info = Observable("—")
+    Label(fig[3, 1], info; tellwidth = false)
+
+    sl = sg.sliders
+    palette = [:red, :orange, :gold, :green, :cyan, :purple]
+
+    onany(sl[1].value, sl[2].value, sl[3].value,
+          sl[4].value, sl[5].value, sl[6].value, sl[7].value
+    ) do d, dz, φr, ψ, vx, vy, θ
+
+        empty!(ax)
+
+        sol = calculate(d, dz, φr, ψ, vx, vy, θ)
+
+        # Secant-estimate arcs  (dashed)
+        for (i, pts) in enumerate(sol.estimates)
+            isempty(pts) && continue
+            lines!(ax, first.(pts), last.(pts);
+                   color     = palette[mod1(i, length(palette))],
+                   linewidth = 1.2,
+                   alpha     = 0.6,
+                   linestyle = :dash)
+        end
+
+        # Converged trajectory  (solid blue)
+        if !isempty(sol.trajectory)
+            lines!(ax, first.(sol.trajectory), last.(sol.trajectory);
+                   color = :blue, linewidth = 4)
+        end
+
+        # Target marker
+        scatter!(ax, [d], [dz]; color = :red, markersize = 20)
+
+        # Info bar
+        tag = sol.valid ? "✓ VALID" : "✗ INVALID"
+        info[] =
+            "Flywheel: $(round(sol.flywheel; digits=2)) m/s  │  " *
+            "Turret Yaw: $(round(sol.turret_yaw; digits=2))°  │  " *
+            "Sim Error: $(round(sol.error; digits=3)) m  │  $tag\n" *
+            "m̂ (vacuum): $(round(sol.m_guess; digits=2))  │  " *
+            "φ_field: $(round(φr + ψ; digits=1))°  │  " *
+            "Robot V = ($(round(vx; digits=2)), $(round(vy; digits=2))) m/s"
+    end
+
+    notify(sl[1].value)          # trigger first render
+    display(fig)
+end
+
+# ── Launch ──
+interactive_solver()
