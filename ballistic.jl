@@ -90,6 +90,7 @@ function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
     den = den ≤ 0.0 ? 0.001 : den             # guard NaN
     v_w = √(num / den)
     m̂   = v_w * cosθ                          # vacuum guess (m-hat)
+    m̂   = clamp(m̂, 0.1, v_max)                # keep seed in the valid domain
 
     # 3 ── Secant iteration on m ──
     m₀ = m̂
@@ -101,12 +102,22 @@ function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
 
     converged = false
     for _ in 1:N_SECANT
+        # ── Flat-slope guard ──
+        # A near-zero secant slope only means convergence if h₁ is ALSO
+        # within tolerance of the target — a flat region far from Δz is
+        # not a solution.
         if abs(h₁ - h₀) < 1e-4
-            converged = true; break
+            converged = abs(h₁ - Δz) < ε_h; break
         end
         ε₁ = h₁ - Δz
         ε₀ = h₀ - Δz
         m_new = m₁ - ε₁ * (m₁ - m₀) / (ε₁ - ε₀)
+        # ── Clamp to a physically meaningful range ──
+        # Without this, the secant step can go negative (ball travels
+        # backward → simulate's stall guard loops pointlessly) or blow up
+        # far past v_max.
+        m_new = clamp(m_new, 0.1, v_max)
+
         push!(ms, m_new)
 
         m₀, h₀ = m₁, h₁
@@ -136,7 +147,6 @@ function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
     # 7 ── Trajectories for plot ──
     estimates = Vector{Vector{Tuple{Float64,Float64}}}()
     for m in ms[1:end-1]
-        m > 0 || continue
         ex  = m * cosφ - Vx
         ey  = m * sinφ - Vy
         evz = hypot(ex, ey) * tanθ
@@ -203,6 +213,12 @@ function simulate(vₓ₀, vz₀, d; trace=false)
     pts = trace ? Tuple{Float64,Float64}[(0.0, 0.0)] : nothing
 
     while x < d && t < t_max
+        # ── Stall guard ──
+        # If drag (+ Magnus on ascent) has bled vₓ to zero or negative,
+        # the ball can never reach d — without this guard the trim step
+        # below divides by zero/negative and the loop can misbehave.
+        vₓ <= 0.0 && break
+
         # Trim the last step so x lands on d
         if x + vₓ * Δt > d
             Δt = (d - x) / vₓ
@@ -221,15 +237,13 @@ function simulate(vₓ₀, vz₀, d; trace=false)
         kₓ₄ = aₓ(vₓ + kₓ₃*Δt,   vz + kz₃*Δt  )
         kz₄ = az(vₓ + kₓ₃*Δt,   vz + kz₃*Δt  )
 
-        # Weighted average - "a-bar"
-        āₓ = (kₓ₁ + 2kₓ₂ + 2kₓ₃ + kₓ₄) / 6
-        āz = (kz₁ + 2kz₂ + 2kz₃ + kz₄) / 6
+        # Update state with the weighted averages
+        x  += vₓ * Δt + ((Δt^2)/6) * (kₓ₁ + kₓ₂ + kₓ₃)
+        z  += vz * Δt + ((Δt^2)/6) * (kz₁ + kz₂ + kz₃)
 
-        # Update state
-        x  += vₓ * Δt + 0.5 * āₓ * Δt^2
-        z  += vz * Δt + 0.5 * āz * Δt^2
-        vₓ += āₓ * Δt
-        vz += āz * Δt
+        vₓ += Δt/6 * (kₓ₁ + 2kₓ₂ + 2kₓ₃ + kₓ₄)
+        vz += Δt/6 * (kz₁ + 2kz₂ + 2kz₃ + kz₄)
+
         t  += Δt
 
         !isnothing(pts) && push!(pts, (x, z))
