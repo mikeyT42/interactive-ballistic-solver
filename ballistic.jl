@@ -31,6 +31,17 @@ const v_max   = 35.0                   # flywheel speed ceiling           [m/s]
 const ε_h     = 0.02                   # height-error tolerance           [m]
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Data Structs
+# ══════════════════════════════════════════════════════════════════════════════
+struct ShotResult
+    isValid::Bool
+    turretYaw°::Float64
+    hoodPitch°::Float64
+    v_flywheel::Float64
+    simError::Float64
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Main Ballistic Solver
 #  (1:1 with Java  VelocityAngleSolver.calculate)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -198,8 +209,8 @@ function simulate(vₓ₀, vz₀, d; trace=false)
         end
 
         # ── RK4 stages ────────────────────────────
-        kₓ₁ = aₓ(vₓ,             vz            )
-        kz₁ = az(vₓ,             vz            )
+        kₓ₁ = aₓ(vₓ, vz)
+        kz₁ = az(vₓ, vz)
 
         kₓ₂ = aₓ(vₓ + kₓ₁*Δt/2, vz + kz₁*Δt/2)
         kz₂ = az(vₓ + kₓ₁*Δt/2, vz + kz₁*Δt/2)
@@ -210,7 +221,7 @@ function simulate(vₓ₀, vz₀, d; trace=false)
         kₓ₄ = aₓ(vₓ + kₓ₃*Δt,   vz + kz₃*Δt  )
         kz₄ = az(vₓ + kₓ₃*Δt,   vz + kz₃*Δt  )
 
-        # Weighted average
+        # Weighted average - "a-bar"
         āₓ = (kₓ₁ + 2kₓ₂ + 2kₓ₃ + kₓ₄) / 6
         āz = (kz₁ + 2kz₂ + 2kz₃ + kz₄) / 6
 
