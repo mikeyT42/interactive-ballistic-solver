@@ -244,20 +244,33 @@ function h_at_m(m, Vx, Vy, cosφ, sinφ, tanθ, d)
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Interactive GLMakie Visualisation
+#  Interactive GLMakie Visualisation  (3-D field view)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#  World layout:
+#    • Target sits fixed at the field-frame origin, height Δz.
+#    • Robot position is placed d_floor away from the target, back along the
+#      field-centric azimuth φ = φᵣ + ψ (so "azimuth 0, heading 0" places the
+#      robot on the −X side of the target, aiming in +X).
+#    • Trajectory points returned by `calculate` are (radial, height) pairs in
+#      the shooter's own aiming plane — they get rotated into field X/Y by the
+#      same cosφ, sinφ used inside `calculate` itself.
+#    • Two arrows drawn from the robot marker show its field-centric Vx and Vy
+#      velocity components; both grow/shrink with magnitude and (for Vx) swing
+#      direction if the sign flips.
 # ══════════════════════════════════════════════════════════════════════════════
 
 function interactive_solver()
-    fig = Figure(size = (1050, 780))
+    fig = Figure(size = (1100, 820))
 
-    ax = Axis(fig[1, 1];
-        title        = "Ballistic Trajectory  (Radial–Vertical Plane)",
-        xlabel       = "Radial Distance  [m]",
-        ylabel       = "Height  [m]",
-        xgridvisible = true,
-        ygridvisible = true)
-    xlims!(ax, 0, 10)
-    ylims!(ax, -2, 8)
+    ax = Axis3(fig[1, 1];
+        title  = "Ballistic Trajectory  (3-D Field View)",
+        xlabel = "Field X  [m]",
+        ylabel = "Field Y  [m]",
+        zlabel = "Height  [m]")
+    xlims!(ax, -6, 6)
+    ylims!(ax, -6, 6)
+    zlims!(ax, 0, 8)
 
     sg = SliderGrid(fig[2, 1],
         (label = "d_floor  [m]",
@@ -282,18 +295,35 @@ function interactive_solver()
     sl = sg.sliders
     palette = [:red, :orange, :gold, :green, :cyan, :purple]
 
+    # Scale factor turning m/s of robot velocity into a visible arrow length
+    arrow_scale = 0.6
+
     onany(sl[1].value, sl[2].value, sl[3].value,
           sl[4].value, sl[5].value, sl[6].value, sl[7].value
-    ) do d, dz, φr, ψ, vx, vy, θ
+    ) do d, dz, φr_deg, ψ_deg, vx, vy, θ
 
         empty!(ax)
 
-        sol = calculate(d, dz, φr, ψ, vx, vy, θ)
+        sol = calculate(d, dz, φr_deg, ψ_deg, vx, vy, θ)
+
+        # Field-centric azimuth and robot position (target fixed at origin)
+        φ          = deg2rad(φr_deg + ψ_deg)
+        cosφ, sinφ = cos(φ), sin(φ)
+        robot_x    = -d * cosφ
+        robot_y    = -d * sinφ
+
+        "Rotate a shooter-frame (radial, height) trace into field X/Y/Z."
+        rotate_trace(pts) = (
+            [robot_x + p[1] * cosφ for p in pts],
+            [robot_y + p[1] * sinφ for p in pts],
+            [p[2] for p in pts]
+        )
 
         # Secant-estimate arcs  (dashed)
         for (i, pts) in enumerate(sol.estimates)
             isempty(pts) && continue
-            lines!(ax, first.(pts), last.(pts);
+            xs, ys, zs = rotate_trace(pts)
+            lines!(ax, xs, ys, zs;
                    color     = palette[mod1(i, length(palette))],
                    linewidth = 1.2,
                    alpha     = 0.6,
@@ -302,12 +332,58 @@ function interactive_solver()
 
         # Converged trajectory  (solid blue)
         if !isempty(sol.trajectory)
-            lines!(ax, first.(sol.trajectory), last.(sol.trajectory);
-                   color = :blue, linewidth = 4)
+            xs, ys, zs = rotate_trace(sol.trajectory)
+            lines!(ax, xs, ys, zs; color = :blue, linewidth = 4)
         end
 
         # Target marker
-        scatter!(ax, [d], [dz]; color = :red, markersize = 20)
+        scatter!(ax, [0.0], [0.0], [dz]; color = :red, markersize = 20)
+
+        # Robot marker
+        scatter!(ax, [robot_x], [robot_y], [0.0]; color = :black,
+                 markersize = 18)
+
+        # ── Robot velocity-vector arrows (Vx, Vy) ──
+        # Vx drawn along field X, Vy drawn along field Y. Each arrow starts
+        # just outside the robot marker (offset along its own direction) so
+        # it doesn't overlap/obstruct the dot, and grows/shrinks/flips with
+        # the sliders since it's recomputed from vx, vy every callback.
+        stand_off = 0.12   # gap between marker edge and arrow start [m]
+
+        vx_dir = Vec3f(sign(vx) == 0 ? 1.0 : sign(vx), 0.0, 0.0)
+        vy_dir = Vec3f(0.0, sign(vy) == 0 ? 1.0 : sign(vy), 0.0)
+
+        arrow_origins = [Point3f(robot_x, robot_y, 0.05) + stand_off * vx_dir,
+                          Point3f(robot_x, robot_y, 0.05) + stand_off * vy_dir]
+        arrow_dirs    = [Vec3f(vx * arrow_scale, 0.0, 0.0),
+                          Vec3f(0.0, vy * arrow_scale, 0.0)]
+
+        arrows3d!(ax, arrow_origins, arrow_dirs;
+            color      = [:orange, :purple],
+            shaftradius = 0.05,
+            tipradius   = 0.1,
+            tiplength   = 0.2)
+
+        # ── Heading (ψ) and Azimuth (φ) direction indicators ──
+        # These show *direction only*, not magnitude, so both arrows are
+        # drawn at a fixed length regardless of slider values. Raised in Z
+        # above the Vx/Vy arrows so all four don't visually collide.
+        angle_len   = 0.8   # fixed arrow length for direction indicators [m]
+        angle_z     = 0.35  # height above ground for these arrows [m]
+
+        ψ_rad = deg2rad(ψ_deg)
+        ψ_dir = Vec3f(cos(ψ_rad) * angle_len, sin(ψ_rad) * angle_len, 0.0)
+        φ_dir = Vec3f(cosφ * angle_len, sinφ * angle_len, 0.0)
+
+        angle_origins = [Point3f(robot_x, robot_y, angle_z),
+                          Point3f(robot_x, robot_y, angle_z)]
+        angle_dirs    = [ψ_dir, φ_dir]
+
+        arrows3d!(ax, angle_origins, angle_dirs;
+            color       = [:dodgerblue, :hotpink],
+            shaftradius = 0.05,
+            tipradius   = 0.1,
+            tiplength   = 0.2)
 
         # Info bar
         tag = sol.valid ? "✓ VALID" : "✗ INVALID"
@@ -316,8 +392,10 @@ function interactive_solver()
             "Turret Yaw: $(round(sol.turret_yaw; digits=2))°  │  " *
             "Sim Error: $(round(sol.error; digits=3)) m  │  $tag\n" *
             "m̂ (vacuum): $(round(sol.m_guess; digits=2))  │  " *
-            "φ_field: $(round(φr + ψ; digits=1))°  │  " *
-            "Robot V = ($(round(vx; digits=2)), $(round(vy; digits=2))) m/s"
+            "φ_field: $(round(φr_deg + ψ_deg; digits=1))°  │  " *
+            "Robot V = ($(round(vx; digits=2)), $(round(vy; digits=2))) m/s\n" *
+            "Arrows — orange: Vₓ  │  purple: Vy  │  " *
+            "dodgerblue: heading ψ  │  hotpink: azimuth φ (→ target)"
     end
 
     notify(sl[1].value)          # trigger first render
