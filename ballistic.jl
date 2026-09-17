@@ -1,5 +1,15 @@
 using GLMakie
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Greek Letter Names
+# ══════════════════════════════════════════════════════════════════════════════
+# Δ : Uppercase Delta
+# ψ : Lowercase Psi
+# ρ : Lowercase Rho
+# ϵ : Lowercase Epsilon
+# θ : Lowercase Theta
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Physical Constants
 # ══════════════════════════════════════════════════════════════════════════════
@@ -21,6 +31,120 @@ const v_max   = 35.0                   # flywheel speed ceiling           [m/s]
 const ε_h     = 0.02                   # height-error tolerance           [m]
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Main Ballistic Solver
+#  (1:1 with Java  VelocityAngleSolver.calculate)
+# ══════════════════════════════════════════════════════════════════════════════
+
+"""
+    calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
+
+Full ballistic solve with moving-reference-frame compensation.
+
+| symbol  | meaning                                |
+|---------|----------------------------------------|
+| d_floor | radial floor distance to target  [m]   |
+| Δz      | target vertical offset (height)  [m]   |
+| φᵣ_deg  | target azimuth, **robot** frame  [°]   |
+| ψ_deg   | robot heading (field, Pigeon 2)  [°]   |
+| Vx, Vy  | field-centric robot velocity     [m/s] |
+| θ_deg   | fixed hood launch angle          [°]   |
+
+Returns `NamedTuple`:
+  flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
+"""
+function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
+
+    # ── Early bail-out ──
+    if d_floor < 0.1
+        return (flywheel   = 0.0,  turret_yaw = 0.0,
+                error      = 999.0, valid      = false,
+                trajectory = Tuple{Float64,Float64}[],
+                estimates  = Vector{Tuple{Float64,Float64}}[],
+                m_guess    = 0.0)
+    end
+
+    # 1 ── Angle conversion  (robot → field) ──
+    φᵣ         = deg2rad(φᵣ_deg)
+    ψ          = deg2rad(ψ_deg)
+    φ          = φᵣ + ψ                       # field-centric azimuth
+    cosφ, sinφ = cos(φ), sin(φ)
+
+    θ    = deg2rad(θ_deg)
+    cosθ = cos(θ)
+    tanθ = tan(θ)
+
+    # 2 ── Vacuum initial guess ──
+    num = g * d_floor^2
+    den = 2cosθ^2 * (d_floor * tanθ - Δz)
+    den = den ≤ 0.0 ? 0.001 : den             # guard NaN
+    v_w = √(num / den)
+    m̂   = v_w * cosθ                          # vacuum guess (m-hat)
+
+    # 3 ── Secant iteration on m ──
+    m₀ = m̂
+    m₁ = m̂ + 0.5
+    h₀ = h_at_m(m₀, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+    h₁ = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+
+    ms = [m₀, m₁]                             # archive for viz
+
+    converged = false
+    for _ in 1:N_SECANT
+        if abs(h₁ - h₀) < 1e-4
+            converged = true; break
+        end
+        ε₁ = h₁ - Δz
+        ε₀ = h₀ - Δz
+        m_new = m₁ - ε₁ * (m₁ - m₀) / (ε₁ - ε₀)
+        push!(ms, m_new)
+
+        m₀, h₀ = m₁, h₁
+        m₁      = m_new
+        h₁      = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+
+        if abs(h₁ - Δz) < 0.01
+            converged = true; break
+        end
+    end
+
+    # 4 ── Final flywheel speed ──
+    m_f = m₁
+    sx  = m_f * cosφ - Vx
+    sy  = m_f * sinφ - Vy
+    v_h = hypot(sx, sy)
+    flywheel = cosθ > 1e-3 ? v_h / cosθ : 0.0
+
+    # 5 ── Turret yaw  (shot leading removed — pure direction) ──
+    yaw = rad2deg(φ) - ψ_deg
+    yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
+
+    # 6 ── Validity  (Stage-1 math/geometry) ──
+    sim_err = abs(h₁ - Δz)
+    valid   = converged && sim_err ≤ ε_h && flywheel > 0 && flywheel ≤ v_max
+
+    # 7 ── Trajectories for plot ──
+    estimates = Vector{Vector{Tuple{Float64,Float64}}}()
+    for m in ms[1:end-1]
+        m > 0 || continue
+        ex  = m * cosφ - Vx
+        ey  = m * sinφ - Vy
+        evz = hypot(ex, ey) * tanθ
+        _, pts = simulate(m, evz, d_floor; trace=true)
+        push!(estimates, pts)
+    end
+
+    _, final_pts = simulate(m_f, v_h * tanθ, d_floor; trace=true)
+
+    return (flywheel   = flywheel,
+            turret_yaw = yaw,
+            error      = sim_err,
+            valid      = valid,
+            trajectory = final_pts,
+            estimates  = estimates,
+            m_guess    = m̂)
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Aerodynamic Acceleration  (2-D radial–vertical plane)
 #
 #    vₓ : horizontal (radial) velocity     [m/s]
@@ -33,6 +157,7 @@ function aₓ(vₓ, vz)
     v == 0.0 && return 0.0
     Fd = -0.5 * ρ * A * C_D * v * vₓ
     Fl = -0.5 * ρ * A * C_L * v * vz
+
     return (Fd + Fl) / M
 end
 
@@ -116,120 +241,6 @@ function h_at_m(m, Vx, Vy, cosφ, sinφ, tanθ, d)
     v_h = hypot(sx, sy)                # horizontal speed, shooter frame
     v_z = v_h * tanθ                   # vertical from fixed hood
     return simulate(m, v_z, d)
-end
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Main Ballistic Solver
-#  (1:1 with Java  VelocityAngleSolver.calculate)
-# ══════════════════════════════════════════════════════════════════════════════
-
-"""
-    calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
-
-Full ballistic solve with moving-reference-frame compensation.
-
-| symbol  | meaning                                |
-|---------|----------------------------------------|
-| d_floor | radial floor distance to target  [m]   |
-| Δz      | target vertical offset (height)  [m]   |
-| φᵣ_deg  | target azimuth, **robot** frame  [°]   |
-| ψ_deg   | robot heading (field, Pigeon 2)  [°]   |
-| Vx, Vy  | field-centric robot velocity     [m/s] |
-| θ_deg   | fixed hood launch angle          [°]   |
-
-Returns `NamedTuple`:
-  flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
-"""
-function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
-
-    # ── Early bail-out ──
-    if d_floor < 0.1
-        return (flywheel   = 0.0,  turret_yaw = 0.0,
-                error      = 999.0, valid      = false,
-                trajectory = Tuple{Float64,Float64}[],
-                estimates  = Vector{Tuple{Float64,Float64}}[],
-                m_guess    = 0.0)
-    end
-
-    # 1 ── Angle conversion  (robot → field) ──
-    φᵣ         = deg2rad(φᵣ_deg)
-    ψ          = deg2rad(ψ_deg)
-    φ          = φᵣ + ψ                       # field-centric azimuth
-    cosφ, sinφ = cos(φ), sin(φ)
-
-    θ    = deg2rad(θ_deg)
-    cosθ = cos(θ)
-    tanθ = tan(θ)
-
-    # 2 ── Vacuum initial guess ──
-    num = g * d_floor^2
-    den = 2cosθ^2 * (d_floor * tanθ - Δz)
-    den = den ≤ 0.0 ? 0.001 : den             # guard NaN
-    v_w = √(num / den)
-    m̂   = v_w * cosθ                          # vacuum guess
-
-    # 3 ── Secant iteration on m ──
-    m₀ = m̂
-    m₁ = m̂ + 0.5
-    h₀ = h_at_m(m₀, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-    h₁ = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-
-    ms = [m₀, m₁]                             # archive for viz
-
-    converged = false
-    for _ in 1:N_SECANT
-        if abs(h₁ - h₀) < 1e-4
-            converged = true; break
-        end
-        ε₁ = h₁ - Δz
-        ε₀ = h₀ - Δz
-        m_new = m₁ - ε₁ * (m₁ - m₀) / (ε₁ - ε₀)
-        push!(ms, m_new)
-
-        m₀, h₀ = m₁, h₁
-        m₁      = m_new
-        h₁      = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-
-        if abs(h₁ - Δz) < 0.01
-            converged = true; break
-        end
-    end
-
-    # 4 ── Final flywheel speed ──
-    m_f = m₁
-    sx  = m_f * cosφ - Vx
-    sy  = m_f * sinφ - Vy
-    v_h = hypot(sx, sy)
-    flywheel = cosθ > 1e-3 ? v_h / cosθ : 0.0
-
-    # 5 ── Turret yaw  (shot leading removed — pure direction) ──
-    yaw = rad2deg(φ) - ψ_deg
-    yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
-
-    # 6 ── Validity  (Stage-1 math/geometry) ──
-    sim_err = abs(h₁ - Δz)
-    valid   = converged && sim_err ≤ ε_h && flywheel > 0 && flywheel ≤ v_max
-
-    # 7 ── Trajectories for plot ──
-    estimates = Vector{Vector{Tuple{Float64,Float64}}}()
-    for m in ms[1:end-1]
-        m > 0 || continue
-        ex  = m * cosφ - Vx
-        ey  = m * sinφ - Vy
-        evz = hypot(ex, ey) * tanθ
-        _, pts = simulate(m, evz, d_floor; trace=true)
-        push!(estimates, pts)
-    end
-
-    _, final_pts = simulate(m_f, v_h * tanθ, d_floor; trace=true)
-
-    return (flywheel   = flywheel,
-            turret_yaw = yaw,
-            error      = sim_err,
-            valid      = valid,
-            trajectory = final_pts,
-            estimates  = estimates,
-            m_guess    = m̂)
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
