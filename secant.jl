@@ -1,51 +1,73 @@
 include("constants.jl")
+include("rk4.jl")
 
-function secant_integration(d_floor::Float16, Δz::Float16, cosθ::Float32,
-        tanθ::Float32)
-    # 2 ── Vacuum initial guess ──
-    num = g * d_floor^2
-    den = 2cosθ^2 * (d_floor * tanθ - Δz)
+# ══════════════════════════════════════════════════════════════════════════════
+#  Secant Method Root Finder
+# ══════════════════════════════════════════════════════════════════════════════
+
+function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ, vˣ, vʸ)
+    N_SECANT = 5                              # max secant iterations
+
+    # 1 ── Vacuum initial guess ──
+    num = g * dᶠ^2
+    den = 2cosθ^2 * (dᶠ * tanθ - Δz)
     den = den ≤ 0.0 ? 0.001 : den             # guard NaN
-    v_w = √(num / den)
-    m̂   = v_w * cosθ                          # vacuum guess (m-hat)
-    m̂   = clamp(m̂, 0.1, v_max)                # keep seed in the valid domain
+    v̂ = √(num / den)
+    m̂   = v̂ * cosθ                            # vacuum guess (m-hat)
+    m̂   = clamp(m̂, 0.1, v̄)                    # keep seed in the valid domain
 
-    # 3 ── Secant iteration on m ──
+    # 2 ── Secant iteration on m ──
     m₀ = m̂
     m₁ = m̂ + 0.5
-    h₀ = h_at_m(m₀, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-    h₁ = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+    h₀ = h_at_m(m₀, vˣ, vʸ, cosφ, sinφ, tanθ, dᶠ)
+    h₁ = h_at_m(m₁, vˣ, vʸ, cosφ, sinφ, tanθ, dᶠ)
 
-    ms = [m₀, m₁]                             # archive for viz
+    mₛ = [m₀, m₁]                             # archive for viz
 
     converged = false
+    hₙ₋₁ = h₀
+    hₙ = h₁
+    mₙ = m₁
+    mₙ₋₁ = m₀
     for _ in 1:N_SECANT
         # ── Flat-slope guard ──
         # A near-zero secant slope only means convergence if h₁ is ALSO
         # within tolerance of the target — a flat region far from Δz is
         # not a solution.
-        if abs(h₁ - h₀) < 1e-4
-            converged = abs(h₁ - Δz) < ε_h; break
+        if abs(hₙ - hₙ₋₁) < 1e-4
+            converged = abs(hₙ - Δz) < εᶻ; break
         end
-        ε₁ = h₁ - Δz
-        ε₀ = h₀ - Δz
-        m_new = m₁ - ε₁ * (m₁ - m₀) / (ε₁ - ε₀)
+        εₙ = hₙ - Δz
+        εₙ₋₁ = hₙ₋₁ - Δz
+        mₙ₊₁ = mₙ - εₙ * (mₙ - mₙ₋₁) / (εₙ - εₙ₋₁)
         # ── Clamp to a physically meaningful range ──
         # Without this, the secant step can go negative (ball travels
         # backward → simulate's stall guard loops pointlessly) or blow up
-        # far past v_max.
-        m_new = clamp(m_new, 0.1, v_max)
+        # far past v̄.
+        mₙ₊₁ = clamp(mₙ₊₁, 0.1, v̄)
 
-        push!(ms, m_new)
+        push!(mₛ, mₙ₊₁)
 
-        m₀, h₀ = m₁, h₁
-        m₁      = m_new
-        h₁      = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
+        mₙ₋₁, hₙ₋₁  = mₙ, hₙ
+        mₙ      = mₙ₊₁
+        hₙ      = h_at_m(mₙ, vˣ, vʸ, cosφ, sinφ, tanθ, dᶠ)
 
-        if abs(h₁ - Δz) < 0.01
+        if abs(hₙ - Δz) < 0.01
             converged = true; break
         end
     end
 
-    return converged, ms
+    return converged, mₛ, mₙ, hₙ, m̂
+end
+
+"""
+Height at target distance `d` for world horizontal speed `m`,
+subtracting robot velocity and deriving vz from the fixed hood angle.
+"""
+function h_at_m(m, vˣ, vʸ, cosφ, sinφ, tanθ, d)
+    vₛˣ  = m * cosφ - vˣ                # shooter velocity x  (field)
+    vₛʸ  = m * sinφ - vʸ                # shooter velocity y  (field)
+    vₕ = hypot(vₛˣ, vₛʸ)                # horizontal speed, shooter frame
+    vᶻ = vₕ * tanθ                      # vertical from fixed hood
+    return rk4_simulate(m, vᶻ, d)
 end

@@ -2,12 +2,14 @@ using GLMakie
 
 include("constants.jl")
 include("ShotResult.jl")
+include("secant.jl")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Greek Letter Names
 # ══════════════════════════════════════════════════════════════════════════════
 # Δ : Uppercase Delta
 # ψ : Lowercase Psi
+# φ : Lowercase Phi Variant
 # ρ : Lowercase Rho
 # ϵ : Lowercase Epsilon
 # θ : Lowercase Theta
@@ -18,26 +20,25 @@ include("ShotResult.jl")
 # ══════════════════════════════════════════════════════════════════════════════
 
 """
-    calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
+    calculate(dᶠ, Δz, φᵣ°, ψ°, vˣ, vʸ, θ°)
 
 Full ballistic solve with moving-reference-frame compensation.
 
 | symbol  | meaning                                |
 |---------|----------------------------------------|
-| d_floor | radial floor distance to target  [m]   |
+| dᶠ      | radial floor distance to target  [m]   |
 | Δz      | target vertical offset (height)  [m]   |
-| φᵣ_deg  | target azimuth, **robot** frame  [°]   |
-| ψ_deg   | robot heading (field, Pigeon 2)  [°]   |
-| Vx, Vy  | field-centric robot velocity     [m/s] |
-| θ_deg   | fixed hood launch angle          [°]   |
+| φᵣ°     | target azimuth, **robot** frame  [°]   |
+| ψ°      | robot heading (field, Pigeon 2)  [°]   |
+| vˣ, vʸ  | field-centric robot velocity     [m/s] |
+| θ°      | fixed hood launch angle          [°]   |
 
 Returns `NamedTuple`:
   flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
 """
-function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
-
+function calculate(dᶠ, Δz, φᵣ°, ψ°, vˣ, vʸ, θ°)
     # ── Early bail-out ──
-    if d_floor < 0.1
+    if dᶠ < 0.1
         return (flywheel   = 0.0,  turret_yaw = 0.0,
                 error      = 999.0, valid      = false,
                 trajectory = Tuple{Float64,Float64}[],
@@ -46,86 +47,44 @@ function calculate(d_floor, Δz, φᵣ_deg, ψ_deg, Vx, Vy, θ_deg)
     end
 
     # 1 ── Angle conversion  (robot → field) ──
-    φᵣ         = deg2rad(φᵣ_deg)
-    ψ          = deg2rad(ψ_deg)
+    φᵣ         = deg2rad(φᵣ°)
+    ψ          = deg2rad(ψ°)
     φ          = φᵣ + ψ                       # field-centric azimuth
     cosφ, sinφ = cos(φ), sin(φ)
 
-    θ    = deg2rad(θ_deg)
+    θ    = deg2rad(θ°)
     cosθ = cos(θ)
     tanθ = tan(θ)
 
-    # 2 ── Vacuum initial guess ──
-    num = g * d_floor^2
-    den = 2cosθ^2 * (d_floor * tanθ - Δz)
-    den = den ≤ 0.0 ? 0.001 : den             # guard NaN
-    v_w = √(num / den)
-    m̂   = v_w * cosθ                          # vacuum guess (m-hat)
-    m̂   = clamp(m̂, 0.1, v_max)                # keep seed in the valid domain
-
-    # 3 ── Secant iteration on m ──
-    m₀ = m̂
-    m₁ = m̂ + 0.5
-    h₀ = h_at_m(m₀, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-    h₁ = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-
-    ms = [m₀, m₁]                             # archive for viz
-
-    converged = false
-    for _ in 1:N_SECANT
-        # ── Flat-slope guard ──
-        # A near-zero secant slope only means convergence if h₁ is ALSO
-        # within tolerance of the target — a flat region far from Δz is
-        # not a solution.
-        if abs(h₁ - h₀) < 1e-4
-            converged = abs(h₁ - Δz) < ε_h; break
-        end
-        ε₁ = h₁ - Δz
-        ε₀ = h₀ - Δz
-        m_new = m₁ - ε₁ * (m₁ - m₀) / (ε₁ - ε₀)
-        # ── Clamp to a physically meaningful range ──
-        # Without this, the secant step can go negative (ball travels
-        # backward → simulate's stall guard loops pointlessly) or blow up
-        # far past v_max.
-        m_new = clamp(m_new, 0.1, v_max)
-
-        push!(ms, m_new)
-
-        m₀, h₀ = m₁, h₁
-        m₁      = m_new
-        h₁      = h_at_m(m₁, Vx, Vy, cosφ, sinφ, tanθ, d_floor)
-
-        if abs(h₁ - Δz) < 0.01
-            converged = true; break
-        end
-    end
+    converged, mₛ, m₁, h₁, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ,
+                                               vˣ, vʸ)
 
     # 4 ── Final flywheel speed ──
-    m_f = m₁
-    sx  = m_f * cosφ - Vx
-    sy  = m_f * sinφ - Vy
-    v_h = hypot(sx, sy)
-    flywheel = cosθ > 1e-3 ? v_h / cosθ : 0.0
+    mᶠ   = m₁
+    vₛˣ  = mᶠ * cosφ - vˣ
+    vₛʸ  = mᶠ * sinφ - vʸ
+    vʰ   = hypot(vₛˣ, vₛʸ)
+    flywheel = cosθ > 1e-3 ? vʰ / cosθ : 0.0
 
     # 5 ── Turret yaw  (shot leading removed — pure direction) ──
-    yaw = rad2deg(φ) - ψ_deg
+    yaw = rad2deg(φ) - ψ°
     yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
 
     # 6 ── Validity  (Stage-1 math/geometry) ──
     sim_err = abs(h₁ - Δz)
-    valid   = converged && sim_err ≤ ε_h && flywheel > 0 && flywheel ≤ v_max
+    valid   = converged && sim_err ≤ εᶻ && flywheel > 0 && flywheel ≤ v̄
 
     # 7 ── Trajectories for plot ──
     estimates = Vector{Vector{Tuple{Float64,Float64}}}()
-    for m in ms[1:end-1]
-        ex  = m * cosφ - Vx
-        ey  = m * sinφ - Vy
+    for m in mₛ[1:end-1]
+        ex  = m * cosφ - vˣ
+        ey  = m * sinφ - vʸ
         evz = hypot(ex, ey) * tanθ
-        _, pts = simulate(m, evz, d_floor; trace=true)
+        _, pts = simulate(m, evz, dᶠ; trace=true)
         push!(estimates, pts)
     end
 
-    _, final_pts = simulate(m_f, v_h * tanθ, d_floor; trace=true)
+    _, final_pts = simulate(mᶠ, vʰ * tanθ, dᶠ; trace=true)
 
     return (flywheel   = flywheel,
             turret_yaw = yaw,
@@ -183,7 +142,7 @@ function simulate(vₓ₀, vz₀, d; trace=false)
 
     pts = trace ? Tuple{Float64,Float64}[(0.0, 0.0)] : nothing
 
-    while x < d && t < t_max
+    while x < d && t < t̄
         # ── Stall guard ──
         # If drag (+ Magnus on ascent) has bled vₓ to zero or negative,
         # the ball can never reach d — without this guard the trim step
@@ -224,35 +183,19 @@ function simulate(vₓ₀, vz₀, d; trace=false)
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Fixed-Hood Height Helper  (called inside secant loop)
-# ══════════════════════════════════════════════════════════════════════════════
-
-"""
-Height at target distance `d` for world horizontal speed `m`,
-subtracting robot velocity and deriving vz from the fixed hood angle.
-"""
-function h_at_m(m, Vx, Vy, cosφ, sinφ, tanθ, d)
-    sx  = m * cosφ - Vx                # shooter velocity x  (field)
-    sy  = m * sinφ - Vy                # shooter velocity y  (field)
-    v_h = hypot(sx, sy)                # horizontal speed, shooter frame
-    v_z = v_h * tanθ                   # vertical from fixed hood
-    return simulate(m, v_z, d)
-end
-
-# ══════════════════════════════════════════════════════════════════════════════
 #  Interactive GLMakie Visualisation  (3-D field view)
 # ══════════════════════════════════════════════════════════════════════════════
 #
 #  World layout:
 #    • Target sits fixed at the field-frame origin, height Δz.
-#    • Robot position is placed d_floor away from the target, back along the
+#    • Robot position is placed dᶠ away from the target, back along the
 #      field-centric azimuth φ = φᵣ + ψ (so "azimuth 0, heading 0" places the
 #      robot on the −X side of the target, aiming in +X).
 #    • Trajectory points returned by `calculate` are (radial, height) pairs in
 #      the shooter's own aiming plane — they get rotated into field X/Y by the
 #      same cosφ, sinφ used inside `calculate` itself.
-#    • Two arrows drawn from the robot marker show its field-centric Vx and Vy
-#      velocity components; both grow/shrink with magnitude and (for Vx) swing
+#    • Two arrows drawn from the robot marker show its field-centric vˣ and vʸ
+#      velocity components; both grow/shrink with magnitude and (for vˣ) swing
 #      direction if the sign flips.
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -269,7 +212,7 @@ function interactive_solver()
     zlims!(ax, 0, 8)
 
     sg = SliderGrid(fig[2, 1],
-        (label = "d_floor  [m]",
+        (label = "dᶠ [m]",
          range = 0.5:0.01:3.0,       startvalue = 1.0),
         (label = "Δz  (height)  [m]",
          range = 0.0:0.05:2.0,       startvalue = 1.83),
@@ -277,9 +220,9 @@ function interactive_solver()
          range = -180.0:1.0:180.0,   startvalue = 0.0),
         (label = "ψ  (heading)  [°]",
          range = -180.0:1.0:180.0,   startvalue = 0.0),
-        (label = "Vₓ  robot (field)  [m/s]",
+        (label = "vˣ  robot (field)  [m/s]",
          range = -3.0:0.1:3.0,       startvalue = 0.0),
-        (label = "Vy  robot (field)  [m/s]",
+        (label = "vʸ  robot (field)  [m/s]",
          range = -3.0:0.1:3.0,       startvalue = 0.0),
         (label = "θ  (launch angle)  [°]",
          range = 60.0:1.0:80.0,     startvalue = 80.0),
@@ -296,14 +239,14 @@ function interactive_solver()
 
     onany(sl[1].value, sl[2].value, sl[3].value,
           sl[4].value, sl[5].value, sl[6].value, sl[7].value
-    ) do d, dz, φr_deg, ψ_deg, vx, vy, θ
+    ) do d, dz, φr_deg, ψ°, vx, vy, θ
 
         empty!(ax)
 
-        sol = calculate(d, dz, φr_deg, ψ_deg, vx, vy, θ)
+        sol = calculate(d, dz, φr_deg, ψ°, vx, vy, θ)
 
         # Field-centric azimuth and robot position (target fixed at origin)
-        φ          = deg2rad(φr_deg + ψ_deg)
+        φ          = deg2rad(φr_deg + ψ°)
         cosφ, sinφ = cos(φ), sin(φ)
         robot_x    = -d * cosφ
         robot_y    = -d * sinφ
@@ -339,8 +282,8 @@ function interactive_solver()
         scatter!(ax, [robot_x], [robot_y], [0.0]; color = :black,
                  markersize = 18)
 
-        # ── Robot velocity-vector arrows (Vx, Vy) ──
-        # Vx drawn along field X, Vy drawn along field Y. Each arrow starts
+        # ── Robot velocity-vector arrows (vˣ, vʸ) ──
+        # vˣ drawn along field X, vʸ drawn along field Y. Each arrow starts
         # just outside the robot marker (offset along its own direction) so
         # it doesn't overlap/obstruct the dot, and grows/shrinks/flips with
         # the sliders since it's recomputed from vx, vy every callback.
@@ -363,11 +306,11 @@ function interactive_solver()
         # ── Heading (ψ) and Azimuth (φ) direction indicators ──
         # These show *direction only*, not magnitude, so both arrows are
         # drawn at a fixed length regardless of slider values. Raised in Z
-        # above the Vx/Vy arrows so all four don't visually collide.
+        # above the vˣ/vʸ arrows so all four don't visually collide.
         angle_len   = 0.8   # fixed arrow length for direction indicators [m]
         angle_z     = 0.35  # height above ground for these arrows [m]
 
-        ψ_rad = deg2rad(ψ_deg)
+        ψ_rad = deg2rad(ψ°)
         ψ_dir = Vec3f(cos(ψ_rad) * angle_len, sin(ψ_rad) * angle_len, 0.0)
         φ_dir = Vec3f(cosφ * angle_len, sinφ * angle_len, 0.0)
 
@@ -388,9 +331,9 @@ function interactive_solver()
             "Turret Yaw: $(round(sol.turret_yaw; digits=2))°  │  " *
             "Sim Error: $(round(sol.error; digits=3)) m  │  $tag\n" *
             "m̂ (vacuum): $(round(sol.m_guess; digits=2))  │  " *
-            "φ_field: $(round(φr_deg + ψ_deg; digits=1))°  │  " *
+            "φ_field: $(round(φr_deg + ψ°; digits=1))°  │  " *
             "Robot V = ($(round(vx; digits=2)), $(round(vy; digits=2))) m/s\n" *
-            "Arrows — orange: Vₓ  │  purple: Vy  │  " *
+            "Arrows — orange: vˣ  │  purple: vʸ  │  " *
             "dodgerblue: heading ψ  │  hotpink: azimuth φ (→ target)"
     end
 
