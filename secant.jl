@@ -7,7 +7,7 @@ include("rk4.jl")
 #  Secant Method Root Finder
 # ══════════════════════════════════════════════════════════════════════════════
 
-function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ, vˣ, vʸ)
+function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ, vˣ, vʸ)
     # This number controls how long it will take to search the solutioin space.
     # Basically to say, this variable controls it's max root searches.
     N_SECANT = 10
@@ -23,8 +23,8 @@ function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ, vˣ, vʸ)
     # 2 ── Secant iteration on m ──
     m₀ = m̂
     m₁ = m̂ + 0.5
-    h₀ = h_at_m(m₀, vˣ, vʸ, cosφ, sinφ, tanθ, dᶠ)
-    h₁ = h_at_m(m₁, vˣ, vʸ, cosφ, sinφ, tanθ, dᶠ)
+    h₀ = h_at_m(m₀, vˣ, vʸ, cosϕ, sinϕ, tanθ, dᶠ)
+    h₁ = h_at_m(m₁, vˣ, vʸ, cosϕ, sinϕ, tanθ, dᶠ)
 
     mₛ = [m₀, m₁]                             # archive for viz
 
@@ -53,8 +53,8 @@ function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ, vˣ, vʸ)
         push!(mₛ, mₙ₊₁)
 
         mₙ₋₁, hₙ₋₁  = mₙ, hₙ
-        mₙ      = mₙ₊₁
-        hₙ      = h_at_m(mₙ, vˣ, vʸ, cosφ, sinφ, tanθ, dᶠ)
+        mₙ          = mₙ₊₁
+        hₙ          = h_at_m(mₙ, vˣ, vʸ, cosϕ, sinϕ, tanθ, dᶠ)
 
         if abs(hₙ - Δz) < 0.01
             converged = true; break
@@ -64,13 +64,10 @@ function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ, vˣ, vʸ)
     return converged, mₛ, mₙ, hₙ, m̂
 end
 
-"""
-Height at target distance `d` for world horizontal speed `m`,
-subtracting robot velocity and deriving vz from the fixed hood angle.
-"""
-function h_at_m(m, vˣ, vʸ, cosφ, sinφ, tanθ, d)
-    vₛˣ  = m * cosφ - vˣ                # shooter velocity x  (field)
-    vₛʸ  = m * sinφ - vʸ                # shooter velocity y  (field)
+# -------
+function h_at_m(m, vˣ, vʸ, cosϕ, sinϕ, tanθ, d)
+    vₛˣ  = m * cosϕ - vˣ                # shooter velocity x  (field)
+    vₛʸ  = m * sinϕ - vʸ                # shooter velocity y  (field)
     vₕ = hypot(vₛˣ, vₛʸ)                # horizontal speed, shooter frame
     vᶻ = vₕ * tanθ                      # vertical from fixed hood
     return rk4_simulate(m, vᶻ, d)
