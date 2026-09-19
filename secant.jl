@@ -1,4 +1,3 @@
-include("constants.jl")
 include("rk4.jl")
 
 # vˣ = 2 dᶠ = 1.48
