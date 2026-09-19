@@ -10,7 +10,7 @@ include("rk4.jl")
 function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ, vˣ, vʸ)
     # This number controls how long it will take to search the solutioin space.
     # Basically to say, this variable controls it's max root searches.
-    N_SECANT = 5
+    N_SECANT = 10
 
     # 1 ── Vacuum initial guess ──
     num = g * dᶠ^2
