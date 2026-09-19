@@ -9,7 +9,6 @@ include("secant.jl")
 # ══════════════════════════════════════════════════════════════════════════════
 # Δ : Uppercase Delta
 # ψ : Lowercase Psi
-# φ : Lowercase Phi Variant
 # ρ : Lowercase Rho
 # ϵ : Lowercase Epsilon
 # θ : Lowercase Theta
@@ -20,7 +19,7 @@ include("secant.jl")
 # ══════════════════════════════════════════════════════════════════════════════
 
 """
-    calculate(dᶠ, Δz, φᵣ°, ψ°, vˣ, vʸ, θ°)
+    calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
 
 Full ballistic solve with moving-reference-frame compensation.
 
@@ -28,7 +27,7 @@ Full ballistic solve with moving-reference-frame compensation.
 |---------|----------------------------------------|
 | dᶠ      | radial floor distance to target  [m]   |
 | Δz      | target vertical offset (height)  [m]   |
-| φᵣ°     | target azimuth, **robot** frame  [°]   |
+| ϕᵣ°     | target azimuth, **robot** frame  [°]   |
 | ψ°      | robot heading (field, Pigeon 2)  [°]   |
 | vˣ, vʸ  | field-centric robot velocity     [m/s] |
 | θ°      | fixed hood launch angle          [°]   |
@@ -36,7 +35,7 @@ Full ballistic solve with moving-reference-frame compensation.
 Returns `NamedTuple`:
   flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
 """
-function calculate(dᶠ, Δz, φᵣ°, ψ°, vˣ, vʸ, θ°)
+function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     # ── Early bail-out ──
     if dᶠ < 0.1
         return (flywheel   = 0.0,  turret_yaw = 0.0,
@@ -47,27 +46,28 @@ function calculate(dᶠ, Δz, φᵣ°, ψ°, vˣ, vʸ, θ°)
     end
 
     # 1 ── Angle conversion  (robot → field) ──
-    φᵣ         = deg2rad(φᵣ°)
+    ϕᵣ         = deg2rad(ϕᵣ°)
     ψ          = deg2rad(ψ°)
-    φ          = φᵣ + ψ                       # field-centric azimuth
-    cosφ, sinφ = cos(φ), sin(φ)
+    
+    ϕ          = ϕᵣ + ψ                       # field-centric azimuth
+    cosϕ, sinϕ = cos(ϕ), sin(ϕ)
 
     θ    = deg2rad(θ°)
     cosθ = cos(θ)
     tanθ = tan(θ)
 
-    converged, mₛ, m₁, h₁, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosφ, sinφ,
+    converged, mₛ, m₁, h₁, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ,
                                                vˣ, vʸ)
 
     # 4 ── Final flywheel speed ──
     mᶠ   = m₁
-    vₛˣ  = mᶠ * cosφ - vˣ
-    vₛʸ  = mᶠ * sinφ - vʸ
+    vₛˣ  = mᶠ * cosϕ - vˣ
+    vₛʸ  = mᶠ * sinϕ - vʸ
     vʰ   = hypot(vₛˣ, vₛʸ)
     flywheel = cosθ > 1e-3 ? vʰ / cosθ : 0.0
 
     # 5 ── Turret yaw  (shot leading removed — pure direction) ──
-    yaw = rad2deg(φ) - ψ°
+    yaw = rad2deg(ϕ) - ψ°
     yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
 
     # 6 ── Validity  (Stage-1 math/geometry) ──
@@ -77,8 +77,8 @@ function calculate(dᶠ, Δz, φᵣ°, ψ°, vˣ, vʸ, θ°)
     # 7 ── Trajectories for plot ──
     estimates = Vector{Vector{Tuple{Float64,Float64}}}()
     for m in mₛ[1:end-1]
-        ex  = m * cosφ - vˣ
-        ey  = m * sinφ - vʸ
+        ex  = m * cosϕ - vˣ
+        ey  = m * sinϕ - vʸ
         evz = hypot(ex, ey) * tanθ
         _, pts = simulate(m, evz, dᶠ; trace=true)
         push!(estimates, pts)
@@ -184,19 +184,6 @@ end
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Interactive GLMakie Visualisation  (3-D field view)
-# ══════════════════════════════════════════════════════════════════════════════
-#
-#  World layout:
-#    • Target sits fixed at the field-frame origin, height Δz.
-#    • Robot position is placed dᶠ away from the target, back along the
-#      field-centric azimuth φ = φᵣ + ψ (so "azimuth 0, heading 0" places the
-#      robot on the −X side of the target, aiming in +X).
-#    • Trajectory points returned by `calculate` are (radial, height) pairs in
-#      the shooter's own aiming plane — they get rotated into field X/Y by the
-#      same cosφ, sinφ used inside `calculate` itself.
-#    • Two arrows drawn from the robot marker show its field-centric vˣ and vʸ
-#      velocity components; both grow/shrink with magnitude and (for vˣ) swing
-#      direction if the sign flips.
 # ══════════════════════════════════════════════════════════════════════════════
 
 function interactive_solver()
