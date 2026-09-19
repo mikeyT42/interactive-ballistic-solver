@@ -222,6 +222,16 @@ function interactive_solver()
          range = 60.0:1.0:80.0,     startvalue = 80.0),
     )
 
+    # ── Slider colors ──
+    # color_inactive : the unfilled track
+    # color_active   : the filled portion of the track + the handle while dragging
+    # color_active_dimmed : the handle while idle
+    for s in sg.sliders
+        s.color_inactive[]      = RGBf(0.22, 0.22, 0.26)
+        s.color_active[]        = RGBf(0.00, 0.75, 1.00)   # deep sky blue (matches trajectory)
+        s.color_active_dimmed[] = RGBf(0.00, 0.55, 0.80)
+    end
+
     info = Observable("—")
     Label(fig[3, 1], info; tellwidth = false)
 
