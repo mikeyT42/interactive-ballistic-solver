@@ -187,13 +187,20 @@ end
 # ══════════════════════════════════════════════════════════════════════════════
 
 function interactive_solver()
-    fig = Figure(size = (1100, 820))
+    set_theme!(theme_dark())
+    fig = Figure(size = (1100, 820), backgroundcolor = :grey10)
 
     ax = Axis3(fig[1, 1];
         title  = "Ballistic Trajectory  (3-D Field View)",
         xlabel = "Field X  [m]",
         ylabel = "Field Y  [m]",
-        zlabel = "Height  [m]")
+        zlabel = "Height  [m]",
+        backgroundcolor = :grey10,
+        xspinecolor_1 = :grey50, xspinecolor_2 = :grey50, xspinecolor_3 = :grey50,
+        yspinecolor_1 = :grey50, yspinecolor_2 = :grey50, yspinecolor_3 = :grey50,
+        zspinecolor_1 = :grey50, zspinecolor_2 = :grey50, zspinecolor_3 = :grey50,
+        xgridcolor = (:white, 0.12), ygridcolor = (:white, 0.12),
+        zgridcolor = (:white, 0.12))
     xlims!(ax, -6, 6)
     ylims!(ax, -6, 6)
     zlims!(ax, 0, 8)
@@ -219,7 +226,7 @@ function interactive_solver()
     Label(fig[3, 1], info; tellwidth = false)
 
     sl = sg.sliders
-    palette = [:red, :orange, :gold, :green, :cyan, :purple]
+    palette = [:tomato, :orange, :gold, :springgreen, :cyan, :mediumorchid1]
 
     onany(sl[1].value, sl[2].value, sl[3].value,
           sl[4].value, sl[5].value, sl[6].value, sl[7].value
@@ -256,14 +263,14 @@ function interactive_solver()
         # Converged trajectory  (solid blue)
         if !isempty(sol.trajectory)
             xs, ys, zs = rotate_trace(sol.trajectory)
-            lines!(ax, xs, ys, zs; color = :blue, linewidth = 4)
+            lines!(ax, xs, ys, zs; color = :deepskyblue, linewidth = 4)
         end
 
         # Target marker
         scatter!(ax, [0.0], [0.0], [dz]; color = :red, markersize = 20)
 
         # Robot marker
-        scatter!(ax, [robot_x], [robot_y], [0.0]; color = :black,
+        scatter!(ax, [robot_x], [robot_y], [0.0]; color = :white,
                  markersize = 18)
 
         # ── Robot velocity-vector arrows (vˣ, vʸ) ──
@@ -285,7 +292,7 @@ function interactive_solver()
                           Vec3f(0.0, vy * arrow_scale, 0.0)]
 
         arrows3d!(ax, arrow_origins, arrow_dirs;
-            color      = [:orange, :purple],
+            color      = [:orange, :mediumorchid1],
             shaftradius = 0.05,
             tipradius   = 0.1,
             tiplength   = 0.2)
@@ -320,7 +327,7 @@ function interactive_solver()
             "m̂ (vacuum): $(round(sol.m_guess; digits=2))  │  " *
             "φ_field: $(round(φr_deg + ψ°; digits=1))°  │  " *
             "Robot V = ($(round(vx; digits=2)), $(round(vy; digits=2))) m/s\n" *
-            "Arrows — orange: vˣ  │  purple: vʸ  │  " *
+            "Arrows — orange: vˣ  │  violet: vʸ  │  " *
             "dodgerblue: heading ψ  │  hotpink: azimuth φ (→ target)"
     end
 
