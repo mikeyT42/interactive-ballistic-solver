@@ -234,9 +234,6 @@ function interactive_solver()
     sl = sg.sliders
     palette = [:red, :orange, :gold, :green, :cyan, :purple]
 
-    # Scale factor turning m/s of robot velocity into a visible arrow length
-    arrow_scale = 0.6
-
     onany(sl[1].value, sl[2].value, sl[3].value,
           sl[4].value, sl[5].value, sl[6].value, sl[7].value
     ) do d, dz, φr_deg, ψ°, vx, vy, θ
@@ -291,6 +288,9 @@ function interactive_solver()
 
         vx_dir = Vec3f(sign(vx) == 0 ? 1.0 : sign(vx), 0.0, 0.0)
         vy_dir = Vec3f(0.0, sign(vy) == 0 ? 1.0 : sign(vy), 0.0)
+
+        # Scale factor turning m/s of robot velocity into a visible arrow length
+        arrow_scale = 0.9
 
         arrow_origins = [Point3f(robot_x, robot_y, 0.05) + stand_off * vx_dir,
                           Point3f(robot_x, robot_y, 0.05) + stand_off * vy_dir]
