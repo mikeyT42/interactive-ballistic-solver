@@ -209,9 +209,9 @@ function interactive_solver()
         zspinecolor_1 = :grey50, zspinecolor_2 = :grey50, zspinecolor_3 = :grey50,
         xgridcolor = (:white, 0.12), ygridcolor = (:white, 0.12),
         zgridcolor = (:white, 0.12))
-    xlims!(ax, -6, 6)
-    ylims!(ax, -6, 6)
-    zlims!(ax, 0, 8)
+    xlims!(ax, -4, 4)
+    ylims!(ax, -4, 4)
+    zlims!(ax, 0, 4)
 
     sg = SliderGrid(fig[2, 1],
         (label = "dᶠ [m]",
