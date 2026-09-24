@@ -34,6 +34,10 @@ Full ballistic solve with moving-reference-frame compensation.
 
 Returns `NamedTuple`:
   flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
+
+`turret_yaw` is lead-compensated: it points along the muzzle velocity
+(ground-frame target speed minus robot velocity), robot-relative, in [−180, 180].
+When the robot is stationary it reduces to the plain target azimuth ϕᵣ.
 """
 function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     # ── Early bail-out ──
@@ -66,8 +70,12 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     vʰ   = hypot(vₛˣ, vₛʸ)
     flywheel = cosθ > 1e-3 ? vʰ / cosθ : 0.0
 
-    # 5 ── Turret yaw  (shot leading removed — pure direction) ──
-    yaw = rad2deg(ϕ) - ψ°
+    # 5 ── Turret yaw  (shot leading: aim along the muzzle velocity) ──
+    # The muzzle must fire along (vₛˣ, vₛʸ) so that after adding the robot's
+    # own velocity, the ball's ground-frame path points at the target.
+    # atan gives a FIELD-frame angle; subtract heading for the turret PID.
+    fieldYaw° = rad2deg(atan(vₛʸ, vₛˣ))
+    yaw = fieldYaw° - ψ°
     yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
 
     # 6 ── Validity  (Stage-1 math/geometry) ──
@@ -307,38 +315,50 @@ function interactive_solver()
             tipradius   = 0.1,
             tiplength   = 0.2)
 
-        # ── Heading (ψ) and Azimuth (φ) direction indicators ──
-        # These show *direction only*, not magnitude, so both arrows are
+        # ── Heading (ψ), Azimuth (φ) and Turret aim direction indicators ──
+        # These show *direction only*, not magnitude, so all arrows are
         # drawn at a fixed length regardless of slider values. Raised in Z
-        # above the vˣ/vʸ arrows so all four don't visually collide.
+        # above the vˣ/vʸ arrows so they don't visually collide.
         angle_len   = 0.8   # fixed arrow length for direction indicators [m]
-        angle_z     = 0.35  # height above ground for these arrows [m]
+        angle_z     = 0.35  # height above ground for heading/azimuth arrows [m]
+        turret_z    = 0.55  # turret arrow sits higher so it stays visible
+                            # (not hidden behind the azimuth arrow) at zero lead
 
         ψ_rad = deg2rad(ψ°)
         ψ_dir = Vec3f(cos(ψ_rad) * angle_len, sin(ψ_rad) * angle_len, 0.0)
         φ_dir = Vec3f(cosφ * angle_len, sinφ * angle_len, 0.0)
 
+        # sol.turret_yaw is ROBOT-relative; arrows live in the FIELD frame,
+        # so add the heading back to get where the turret actually points.
+        turret_field = deg2rad(sol.turret_yaw + ψ°)
+        turret_dir   = Vec3f(cos(turret_field) * angle_len,
+                             sin(turret_field) * angle_len, 0.0)
+
         angle_origins = [Point3f(robot_x, robot_y, angle_z),
-                          Point3f(robot_x, robot_y, angle_z)]
-        angle_dirs    = [ψ_dir, φ_dir]
+                          Point3f(robot_x, robot_y, angle_z),
+                          Point3f(robot_x, robot_y, turret_z)]
+        angle_dirs    = [ψ_dir, φ_dir, turret_dir]
 
         arrows3d!(ax, angle_origins, angle_dirs;
-            color       = [:dodgerblue, :hotpink],
+            color       = [:dodgerblue, :hotpink, :limegreen],
             shaftradius = 0.05,
             tipradius   = 0.1,
             tiplength   = 0.2)
 
         # Info bar
         tag = sol.valid ? "✓ VALID" : "✗ INVALID"
+        lead = mod(sol.turret_yaw - φr_deg + 180.0, 360.0) - 180.0
         info[] =
             "Flywheel: $(round(sol.flywheel; digits=2)) m/s  │  " *
             "Turret Yaw: $(round(sol.turret_yaw; digits=2))°  │  " *
+            "Lead: $(round(lead; digits=2))°  │  " *
             "Sim Error: $(round(sol.error; digits=3)) m  │  $tag\n" *
             "m̂ (vacuum): $(round(sol.m_guess; digits=2))  │  " *
             "φ_field: $(round(φr_deg + ψ°; digits=1))°  │  " *
             "Robot V = ($(round(vx; digits=2)), $(round(vy; digits=2))) m/s\n" *
             "Arrows — orange: vˣ  │  violet: vʸ  │  " *
-            "dodgerblue: heading ψ  │  hotpink: azimuth φ (→ target)"
+            "dodgerblue: heading ψ  │  hotpink: azimuth φ (→ target)  │  " *
+            "limegreen: turret aim"
     end
 
     notify(sl[1].value)          # trigger first render
