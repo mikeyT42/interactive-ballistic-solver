@@ -56,3 +56,30 @@ function rk4_simulate(vₓ₀, vz₀, d; trace=false)
 
     return trace ? (z, pts) : z
 end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Aerodynamic Acceleration  (2-D radial–vertical plane)
+#
+#    vₓ : horizontal (radial) velocity     [m/s]
+#    vz : vertical velocity  (+up)         [m/s]
+# ══════════════════════════════════════════════════════════════════════════════
+
+"Horizontal (radial) acceleration: drag + Magnus cross-term."
+function aₓ(vₓ, vz)
+    v = hypot(vₓ, vz)
+    v == 0.0 && return 0.0
+    Fd = -0.5 * ρ * A * C_D * v * vₓ
+    Fl = -0.5 * ρ * A * C_L * v * vz
+
+    return (Fd + Fl) / M
+end
+
+"Vertical acceleration: gravity + drag + Magnus lift."
+function az(vₓ, vz)
+    v = hypot(vₓ, vz)
+    v == 0.0 && return -g
+    Fg = -M * g
+    Fd = -0.5 * ρ * A * C_D * v * vz
+    Fl =  0.5 * ρ * A * C_L * v * vₓ
+    return (Fg + Fd + Fl) / M
+end
