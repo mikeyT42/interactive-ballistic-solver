@@ -71,12 +71,7 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     flywheel = cosθ > 1e-3 ? vₛᶻ / cosθ : 0.0
 
     # 5 ── Turret yaw  (shot leading: aim along the muzzle velocity) ──
-    # The muzzle must fire along (vₛˣ, vₛʸ) so that after adding the robot's
-    # own velocity, the ball's ground-frame path points at the target.
-    # atan gives a FIELD-frame angle; subtract heading for the turret PID.
-    fieldYaw° = rad2deg(atan(vₛʸ, vₛˣ))
-    yaw = fieldYaw° - ψ°
-    yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
+    yaw = turret_yaw(vₛˣ, vₛʸ, ψ°)
 
     # 6 ── Validity  (Stage-1 math/geometry) ──
     sim_err = abs(zᶠ - Δz)
@@ -93,6 +88,15 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
             trajectory = final_pts,
             estimates  = estimates,
             m_guess    = m̂)
+end
+
+function turret_yaw(vₛˣ, vₛʸ, ψ°)
+    # The muzzle must fire along (vₛˣ, vₛʸ) so that after adding the robot's
+    # own velocity, the ball's ground-frame path points at the target.
+    # atan gives a FIELD-frame angle; subtract heading for the turret PID.
+    fieldYaw° = rad2deg(atan(vₛʸ, vₛˣ))
+    yaw = fieldYaw° - ψ°
+    yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
