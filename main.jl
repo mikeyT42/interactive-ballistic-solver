@@ -61,6 +61,7 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     cosθ = cos(θ)
     tanθ = tan(θ)
 
+    # 2 ── Simulate ──
     converged, mₛ, mᶠ, zᶠ, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ,
                                                vˣ, vʸ)
 
@@ -70,10 +71,10 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     vₛᶻ  = hypot(vₛˣ, vₛʸ)
     flywheel = cosθ > 1e-3 ? vₛᶻ / cosθ : 0.0
 
-    # 5 ── Turret yaw  (shot leading: aim along the muzzle velocity) ──
+    # 5 ── Turret yaw (shot leading: aim along the muzzle velocity) ──
     yaw = turret_yaw(vₛˣ, vₛʸ, ψ°)
 
-    # 6 ── Validity  (Stage-1 math/geometry) ──
+    # 6 ── Validity (Stage-1 math/geometry) ──
     sim_err = abs(zᶠ - Δz)
     valid   = converged && sim_err ≤ εᶻ && flywheel > 0 && flywheel ≤ v̄
 

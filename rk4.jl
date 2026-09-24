@@ -64,6 +64,7 @@ end
 #    vz : vertical velocity  (+up)         [m/s]
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ──────────────────────────────────────────────────────────────────────────────
 "Horizontal (radial) acceleration: drag + Magnus cross-term."
 function aₓ(vₓ, vz)
     v = hypot(vₓ, vz)
@@ -74,6 +75,7 @@ function aₓ(vₓ, vz)
     return (Fd + Fl) / M
 end
 
+# ──────────────────────────────────────────────────────────────────────────────
 "Vertical acceleration: gravity + drag + Magnus lift."
 function az(vₓ, vz)
     v = hypot(vₓ, vz)

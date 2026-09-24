@@ -7,17 +7,17 @@ include("rk4.jl")
 # ══════════════════════════════════════════════════════════════════════════════
 
 function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ, vˣ, vʸ)
-    # This number controls how long it will take to search the solutioin space.
-    # Basically to say, this variable controls it's max root searches.
+    # This number controls how long it will take to search the solution space.
+    # Basically to say, this variable controls its max root searches.
     N_SECANT = 10
 
     # 1 ── Vacuum initial guess ──
     num = g * dᶠ^2
     den = 2cosθ^2 * (dᶠ * tanθ - Δz)
-    den = den ≤ 0.0 ? 0.001 : den             # guard NaN
+    den = den ≤ 0.0 ? 0.001 : den       # guard NaN
     v̂ = √(num / den)
-    m̂   = v̂ * cosθ                            # vacuum guess (m-hat)
-    m̂   = clamp(m̂, 0.1, v̄)                    # keep seed in the valid domain
+    m̂   = v̂ * cosθ                      # vacuum guess (m-hat)
+    m̂   = clamp(m̂, 0.1, v̄)              # keep seed in the valid domain
 
     # 2 ── Secant iteration on m ──
     m₀ = m̂
@@ -25,7 +25,7 @@ function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ, vˣ, vʸ)
     h₀ = h_at_m(m₀, vˣ, vʸ, cosϕ, sinϕ, tanθ, dᶠ)
     h₁ = h_at_m(m₁, vˣ, vʸ, cosϕ, sinϕ, tanθ, dᶠ)
 
-    mₛ = [m₀, m₁]                             # archive for viz
+    mₛ = [m₀, m₁]   # archive for viz
 
     converged = false
     hₙ₋₁ = h₀
@@ -63,11 +63,11 @@ function secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ, vˣ, vʸ)
     return converged, mₛ, mₙ, hₙ, m̂
 end
 
-# -------
+# ──────────────────────────────────────────────────────────────────────────────
 function h_at_m(m, vˣ, vʸ, cosϕ, sinϕ, tanθ, d)
-    vₛˣ  = m * cosϕ - vˣ                # shooter velocity x  (field)
-    vₛʸ  = m * sinϕ - vʸ                # shooter velocity y  (field)
-    vₕ = hypot(vₛˣ, vₛʸ)                # horizontal speed, shooter frame
-    vᶻ = vₕ * tanθ                      # vertical from fixed hood
+    vₛˣ  = m * cosϕ - vˣ    # shooter velocity x  (field)
+    vₛʸ  = m * sinϕ - vʸ    # shooter velocity y  (field)
+    vₕ = hypot(vₛˣ, vₛʸ)    # horizontal speed, shooter frame
+    vᶻ = vₕ * tanθ          # vertical from fixed hood
     return rk4_simulate(m, vᶻ, d)
 end
