@@ -36,8 +36,9 @@ Returns `NamedTuple`:
   flywheel, turret_yaw, error, valid, trajectory, estimates, m_guess
 
 `turret_yaw` is lead-compensated: it points along the muzzle velocity
-(ground-frame target speed minus robot velocity), robot-relative, in [−180, 180].
-When the robot is stationary it reduces to the plain target azimuth ϕᵣ.
+(ground-frame target speed minus robot velocity), robot-relative, in
+[−180, 180]. When the robot is stationary it reduces to the plain target azimuth
+ϕᵣ.
 """
 function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     # ── Early bail-out ──
@@ -204,9 +205,12 @@ function interactive_solver()
         ylabel = "Field Y  [m]",
         zlabel = "Height  [m]",
         backgroundcolor = :grey10,
-        xspinecolor_1 = :grey50, xspinecolor_2 = :grey50, xspinecolor_3 = :grey50,
-        yspinecolor_1 = :grey50, yspinecolor_2 = :grey50, yspinecolor_3 = :grey50,
-        zspinecolor_1 = :grey50, zspinecolor_2 = :grey50, zspinecolor_3 = :grey50,
+        xspinecolor_1 = :grey50, xspinecolor_2 = :grey50,
+            xspinecolor_3 = :grey50,
+        yspinecolor_1 = :grey50, yspinecolor_2 = :grey50,
+            yspinecolor_3 = :grey50,
+        zspinecolor_1 = :grey50, zspinecolor_2 = :grey50,
+            zspinecolor_3 = :grey50,
         xgridcolor = (:white, 0.12), ygridcolor = (:white, 0.12),
         zgridcolor = (:white, 0.12))
     xlims!(ax, -4, 4)
@@ -232,11 +236,11 @@ function interactive_solver()
 
     # ── Slider colors ──
     # color_inactive : the unfilled track
-    # color_active   : the filled portion of the track + the handle while dragging
+    # color_active : the filled portion of the track + the handle while dragging
     # color_active_dimmed : the handle while idle
     for s in sg.sliders
         s.color_inactive[]      = RGBf(0.22, 0.22, 0.26)
-        s.color_active[]        = RGBf(0.00, 0.75, 1.00)   # deep sky blue (matches trajectory)
+        s.color_active[]        = RGBf(0.00, 0.75, 1.00)
         s.color_active_dimmed[] = RGBf(0.00, 0.55, 0.80)
     end
 
