@@ -9,6 +9,7 @@ include("secant.jl")
 # ══════════════════════════════════════════════════════════════════════════════
 # Δ : Uppercase Delta
 # ψ : Lowercase Psi
+# ϕ : Lowercase Phi
 # ρ : Lowercase Rho
 # ϵ : Lowercase Epsilon
 # θ : Lowercase Theta
@@ -60,14 +61,14 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     cosθ = cos(θ)
     tanθ = tan(θ)
 
-    converged, mₛ, mᶠ, hᶠ, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ,
+    converged, mₛ, mᶠ, zᶠ, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ,
                                                vˣ, vʸ)
 
     # 4 ── Final flywheel speed ──
     vₛˣ  = mᶠ * cosϕ - vˣ
     vₛʸ  = mᶠ * sinϕ - vʸ
-    vʰ   = hypot(vₛˣ, vₛʸ)
-    flywheel = cosθ > 1e-3 ? vʰ / cosθ : 0.0
+    vₛᶻ  = hypot(vₛˣ, vₛʸ)
+    flywheel = cosθ > 1e-3 ? vₛᶻ / cosθ : 0.0
 
     # 5 ── Turret yaw  (shot leading: aim along the muzzle velocity) ──
     # The muzzle must fire along (vₛˣ, vₛʸ) so that after adding the robot's
@@ -78,20 +79,12 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
 
     # 6 ── Validity  (Stage-1 math/geometry) ──
-    sim_err = abs(hᶠ - Δz)
+    sim_err = abs(zᶠ - Δz)
     valid   = converged && sim_err ≤ εᶻ && flywheel > 0 && flywheel ≤ v̄
 
     # 7 ── Trajectories for plot ──
-    estimates = Vector{Vector{Tuple{Float64,Float64}}}()
-    for m in mₛ[1:end-1]
-        evˣ  = m * cosϕ - vˣ
-        evʸ  = m * sinϕ - vʸ
-        evᶻ = hypot(evˣ, evʸ) * tanθ
-        _, pts = rk4_simulate(m, evᶻ, dᶠ; trace=true)
-        push!(estimates, pts)
-    end
-
-    _, final_pts = rk4_simulate(mᶠ, vʰ * tanθ, dᶠ; trace=true)
+    estimates, final_pts = plot_trajectories(mₛ, cosϕ, sinϕ, tanθ, vˣ, vʸ, vₛᶻ,
+                                             dᶠ, mᶠ)
 
     return (flywheel   = flywheel,
             turret_yaw = yaw,
@@ -105,6 +98,21 @@ end
 # ══════════════════════════════════════════════════════════════════════════════
 #  Interactive GLMakie Visualisation  (3-D field view)
 # ══════════════════════════════════════════════════════════════════════════════
+
+function plot_trajectories(mₛ, cosϕ, sinϕ, tanθ, vˣ, vʸ, vᶻ, dᶠ, mᶠ)
+    estimates = Vector{Vector{Tuple{Float64,Float64}}}()
+    for m in mₛ[1:end-1]
+        evˣ  = m * cosϕ - vˣ
+        evʸ  = m * sinϕ - vʸ
+        evᶻ = hypot(evˣ, evʸ) * tanθ
+        _, pts = rk4_simulate(m, evᶻ, dᶠ; trace=true)
+        push!(estimates, pts)
+    end
+
+    _, final_pts = rk4_simulate(mᶠ, vᶻ * tanθ, dᶠ; trace=true)
+
+    return estimates, final_pts
+end
 
 function interactive_solver()
     set_theme!(theme_dark())
