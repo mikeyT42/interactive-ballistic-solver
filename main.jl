@@ -60,11 +60,10 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     cosθ = cos(θ)
     tanθ = tan(θ)
 
-    converged, mₛ, m₁, h₁, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ,
+    converged, mₛ, mᶠ, hᶠ, m̂ = secant_root_find(dᶠ, Δz, cosθ, tanθ, cosϕ, sinϕ,
                                                vˣ, vʸ)
 
     # 4 ── Final flywheel speed ──
-    mᶠ   = m₁
     vₛˣ  = mᶠ * cosϕ - vˣ
     vₛʸ  = mᶠ * sinϕ - vʸ
     vʰ   = hypot(vₛˣ, vₛʸ)
@@ -79,7 +78,7 @@ function calculate(dᶠ, Δz, ϕᵣ°, ψ°, vˣ, vʸ, θ°)
     yaw = mod(yaw + 180.0, 360.0) - 180.0     # → [−180, 180]
 
     # 6 ── Validity  (Stage-1 math/geometry) ──
-    sim_err = abs(h₁ - Δz)
+    sim_err = abs(hᶠ - Δz)
     valid   = converged && sim_err ≤ εᶻ && flywheel > 0 && flywheel ≤ v̄
 
     # 7 ── Trajectories for plot ──
